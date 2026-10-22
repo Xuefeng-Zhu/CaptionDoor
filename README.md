@@ -106,4 +106,4 @@ No cloud/device prerequisites are fabricated. See [docs/integration-contracts.md
 
 `corepack pnpm demo:reset` is destructive **only to CaptionDoor's exact local tables**. It refuses nonlocal endpoints, unexpected ports/table names and production. Use it only to reset this controlled demo; normal setup preserves existing data. It does not delete shared services or Docker volumes from other projects.
 
-New code is MIT; dependency licenses/notices remain in installed packages. See LICENSE and THIRD_PARTY_NOTICES.md. The user subsequently authorized a separate private GitHub source repository. Public visibility, billable deployment and hackathon submission remain unauthorized. Repository verification is recorded in docs/test-results.md.
+New code is MIT; dependency licenses/notices remain in installed packages. See LICENSE and THIRD_PARTY_NOTICES.md. The user subsequently authorized the separate [private GitHub source repository](https://github.com/Xuefeng-Zhu/CaptionDoor). Public visibility, billable deployment and hackathon submission remain unauthorized. Repository verification is recorded in docs/test-results.md.

@@ -32,7 +32,7 @@ Evidence date: **2026-10-22**. This is a draft for review, not submitted feedbac
 - Production artifact inspection found development environment tracing into a standalone build. Loading/tracing were corrected, a packaging guard was added, the generated copy was removed, and subsequent production builds passed. Nothing private was published.
 - Vite's configuration cache initially needed authorized workspace write access. The focused rerun passed; this was a local sandbox/cache issue, not a provider outage.
 - A Playwright transport diagnostic contained an ephemeral local demo cookie. The session was revoked and diagnostic copies removed/redacted; tracing is disabled and transport errors are sanitized. No cloud credential was involved.
-- The expanded browser suite later recorded a connection reset and fixture-setup timeout. Docker server calls/listeners then stopped responding. Resource contention is an unproven hypothesis, not a diagnosed cause. Restarting the shared runtime could affect other projects, so that action was not taken. This currently blocks fresh judge-replay/browser observation; earlier passes are historical.
+- The expanded browser suite later recorded a connection reset and fixture-setup timeout. Docker server calls/listeners then stopped responding. Resource contention is an unproven hypothesis, not a diagnosed cause. Restarting the shared runtime could affect other projects, so that action was not taken. The actual judge replay attempt `output/judge-replay/2026-10-22T01-50-47-905Z-9f77a4/result.json` recorded BLOCKED, exit2 after local-health preflight; no browser pass was counted. Earlier passes are historical.
 
 ## Provider experience not yet available
 

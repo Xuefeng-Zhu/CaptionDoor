@@ -17,7 +17,7 @@ corepack pnpm judge:replay --headed
 
 No provider credentials are required. A healthy isolated local Docker/DynamoDB/web3410/worker3411 environment and Chromium are required; this is not a static or in-memory substitute. The runner refuses existing active demo visits: close them deliberately through the UI before another attempt. Each run writes `output/judge-replay/<UTC timestamp>-<id>/result.json`. Bounded local-health preflight failure records **BLOCKED** and exits2; it is not a browser pass. Only a successful actual child browser journey supplies PASS, with `report/index.html`, `journey-observations.json` and screenshots in that run directory.
 
-The current shared Docker API/listener hang blocks a fresh replay/browser observation. No shared daemon restart/reset is authorized or attempted because other projects must be preserved. See [test-results.md](test-results.md) for exact attempt status, historical passes/failures and recovery prerequisites. No new replay PASS is asserted by this documentation update.
+The actual attempt at `output/judge-replay/2026-10-22T01-50-47-905Z-9f77a4/result.json` recorded **BLOCKED, exit2** because local health/mode prerequisites were unavailable; no browser journey passed. The shared Docker API/listener hang remains unresolved. No shared daemon restart/reset was attempted because other projects must be preserved. See [test-results.md](test-results.md) for historical passes/failures and recovery prerequisites.
 
 ## Ring simulator interpretation and provenance
 
