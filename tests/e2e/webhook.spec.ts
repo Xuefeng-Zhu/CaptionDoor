@@ -1,7 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
 import "../../packages/db/src/repository";
-import { resident, consent, freshVisit, origin, view } from "./helpers";
+import {
+  resident,
+  consent,
+  freshVisit,
+  origin,
+  view,
+  command,
+} from "./helpers";
 test("raw-body signed webhook deduplicates semantic events and rejects tampering and unknown accounts", async ({
   browser,
   request,
@@ -15,9 +22,11 @@ test("raw-body signed webhook deduplicates semantic events and rejects tampering
     "setup:local must configure an isolated local signing secret",
   ).toBe(true);
   const alex = await resident(browser, "alex");
+  let fixtureId: string | undefined;
   try {
     await consent(alex);
     const initial = await freshVisit(alex);
+    fixtureId = initial.id;
     const eventId = randomUUID();
     const payload = {
       meta: {
@@ -78,6 +87,31 @@ test("raw-body signed webhook deduplicates semantic events and rejects tampering
     expect(denied.status()).toBe(403);
     expect((await view(alex, initial.id)).visit.version).toBe(before + 1);
   } finally {
-    await alex.context.close();
+    try {
+      // Close only the exact LOCAL visit created by this test; preserve all history.
+      if (fixtureId) {
+        let current = (await view(alex, fixtureId)).visit;
+        expect(current.eventSource).toBe("LOCAL");
+        if (current.status === "UNCLAIMED") {
+          const claimed = await command(alex, fixtureId, {
+            type: "claim",
+            expectedVersion: current.version,
+          });
+          expect(claimed.ok(), await claimed.text()).toBeTruthy();
+          current = (await claimed.json()).visit;
+        }
+        if (current.status !== "CLOSED") {
+          expect(current.handlerId).toBe(alex.userId);
+          const closed = await command(alex, fixtureId, {
+            type: "close",
+            expectedVersion: current.version,
+            outcome: "NO_RESPONSE_RECORDED",
+          });
+          expect(closed.ok(), await closed.text()).toBeTruthy();
+        }
+      }
+    } finally {
+      await alex.context.close();
+    }
   }
 });

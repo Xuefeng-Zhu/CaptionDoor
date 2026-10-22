@@ -4,6 +4,7 @@ import type { ConversationItem, Visit } from "@captiondoor/domain";
 export type CaptionPanelProps = {
   visit: Visit;
   captions: ConversationItem[];
+  hasCaptionAccess: boolean;
   initialSize: number;
   allowFixture: boolean;
   busy: boolean;
@@ -12,6 +13,7 @@ export type CaptionPanelProps = {
 export function CaptionPanel({
   visit,
   captions,
+  hasCaptionAccess,
   initialSize,
   allowFixture,
   busy,
@@ -22,7 +24,8 @@ export function CaptionPanel({
   const captionPanel = useRef<HTMLDivElement>(null),
     followLive = useRef(true);
   useEffect(() => setCaptionSize(initialSize), [initialSize]);
-  const captionKey = captions
+  const visibleCaptions = hasCaptionAccess ? captions : [];
+  const captionKey = visibleCaptions
     .map((i) => `${i.id}:${i.text}:${i.isPartial}`)
     .join("|");
   useEffect(() => {
@@ -50,7 +53,7 @@ export function CaptionPanel({
           </select>
         </label>
       </div>
-      {visit.transcriptSource === "FIXTURE" ? (
+      {hasCaptionAccess && visit.transcriptSource === "FIXTURE" ? (
         <div className="fixture-label">
           <span aria-hidden="true">◇</span> Demo transcript · synthetic fixture
         </div>
@@ -68,8 +71,16 @@ export function CaptionPanel({
           setAway(!atBottom);
         }}
       >
-        {captions.length ? (
-          captions.map((c) => (
+        {!hasCaptionAccess ? (
+          <div className="caption-empty" role="status">
+            <h3>Caption access is unavailable</h3>
+            <p>
+              Current permissions or household sharing do not allow you to view
+              captions for this visit.
+            </p>
+          </div>
+        ) : visibleCaptions.length ? (
+          visibleCaptions.map((c) => (
             <div
               className={`caption-line ${c.isPartial ? "partial" : ""}`}
               key={`${c.mediaSessionId}:${c.resultId}`}
@@ -102,7 +113,7 @@ export function CaptionPanel({
           </div>
         )}
       </div>
-      {away ? (
+      {hasCaptionAccess && away ? (
         <button
           className="return-live"
           onClick={() => {
@@ -120,7 +131,7 @@ export function CaptionPanel({
         <span>Finalized means complete, not verified.</span>
         <span>No fabricated speakers or sounds.</span>
       </div>
-      {allowFixture ? (
+      {hasCaptionAccess && allowFixture ? (
         <div className="fixture-action">
           <button
             className="button secondary"

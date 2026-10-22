@@ -1,6 +1,6 @@
 # Reproduce the LOCAL judge journey
 
-**Latest checkpoint (2026-10-22 UTC):** The user-approved normal Docker stop/start succeeded after the other project was paused. Only CaptionDoor ran during recovery. Both health endpoints passed and the post-restart real DynamoDB integration suite passed41/41 in9.73s. The user then prioritized pushing source before further tests: the full12-case browser rerun and judge replay are pending, not passes. CaptionDoor web, worker and DynamoDB containers are now deliberately stopped for sequential handoff; the named database volume is preserved. No further builds/tests were launched after that priority change.
+Current execution results, provenance and intentionally paused service state are recorded in [test-results.md](test-results.md).
 
 Prepared **2026-10-22 UTC**. Run `corepack pnpm judge:replay` to exercise CaptionDoor’s existing browser journey against its real local HTTP APIs, authenticated WebSockets, Node worker and DynamoDB Local. No Ring Playground token, AWS account or cloud credentials are required for this **LOCAL** run.
 
@@ -70,7 +70,7 @@ corepack pnpm exec playwright show-report "output/judge-replay/ATTEMPT/report"
 
 Do not present leftover files from an earlier run as a newly passing replay. A screenshot, successful build or provider request acceptance alone is not proof of the complete journey or user acknowledgement. Generated reports and screenshots are ignored by Git; keep credentials, environment files, session material and private visitor content out of anything shared externally.
 
-**No newly passing `judge:replay` execution is claimed here.** At the time this guide was written, shared Docker server API calls hung and bounded application/worker health requests timed out. No shared-runtime reset was attempted. An earlier complete10-case container browser suite passed; the later expanded12-case attempt had10 passes/2 failures, followed by an interrupted unavailable-runtime run. The independent caption-grant browser regression passed; the sharing-withdrawal browser assertion was not reached. The current record and recovery prerequisites are in [test-results.md](test-results.md). Once the shared runtime is healthy again, start only CaptionDoor’s services, pass both health checks, then run this command and record its actual outcome.
+**Actual LOCAL replay passed:** `output/judge-replay/2026-10-22T02-19-27-994Z-0ed445/result.json` records PASS/exit0 after1 browser journey in 12.4s. The final 12-case browser suite also passed in 42.5s, including both privacy withdrawals and explicit access messages. Earlier runtime failures and an active-fixture guard refusal remain in [test-results.md](test-results.md); the exact webhook fixture cleanup was repaired and its history retained. Services are intentionally stopped after verification for sequential handoff. Start only CaptionDoor for its next turn; no real Ring or AWS behavior is established by this pass.
 
 ## Judge walkthrough, QR and provider gates
 

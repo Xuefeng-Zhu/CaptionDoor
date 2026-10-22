@@ -4,6 +4,7 @@ import { timeLabel } from "./api";
 import { Empty } from "./ui";
 export type ConversationPanelProps = {
   messages: ConversationItem[];
+  hasVisitorTextAccess: boolean;
   associatedCount: number;
   nextCursor?: string;
   busy: boolean;
@@ -11,6 +12,7 @@ export type ConversationPanelProps = {
 };
 export function ConversationPanel({
   messages,
+  hasVisitorTextAccess,
   associatedCount,
   nextCursor,
   busy,
@@ -28,7 +30,16 @@ export function ConversationPanel({
           {associatedCount === 1 ? "" : "s"}
         </span>
       </div>
-      {messages.length ? (
+      {!hasVisitorTextAccess ? (
+        <div role="status">
+          <Empty title="Visitor text access is unavailable">
+            <p>
+              Current permissions or household sharing do not allow you to view
+              visitor messages or resident replies for this visit.
+            </p>
+          </Empty>
+        </div>
+      ) : messages.length ? (
         <div className="message-list">
           {messages.map((m) => (
             <article

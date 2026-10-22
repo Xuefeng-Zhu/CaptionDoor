@@ -268,6 +268,7 @@ export function VisitScreen({ id }: { id: string }) {
           <CaptionPanel
             visit={visit}
             captions={view.items.filter((i) => i.kind === "caption")}
+            hasCaptionAccess={view.access.captions}
             initialSize={data.settings.captionSize}
             allowFixture={
               data.mode.transcribe === "fixture" && isHandler && !isClosed
@@ -277,6 +278,7 @@ export function VisitScreen({ id }: { id: string }) {
           />
           <ConversationPanel
             messages={messages}
+            hasVisitorTextAccess={view.access.visitorText}
             associatedCount={associated.length}
             nextCursor={view.nextCursor}
             busy={!!busy}

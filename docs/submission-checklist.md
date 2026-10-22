@@ -1,6 +1,6 @@
 # Submission readiness (submission remains unauthorized)
 
-**Latest checkpoint (2026-10-22 UTC):** The user-approved normal Docker stop/start succeeded after the other project was paused. Only CaptionDoor ran during recovery. Both health endpoints passed and the post-restart real DynamoDB integration suite passed41/41 in9.73s. The user then prioritized pushing source before further tests: the full12-case browser rerun and judge replay are pending, not passes. CaptionDoor web, worker and DynamoDB containers are now deliberately stopped for sequential handoff; the named database volume is preserved. No further builds/tests were launched after that priority change.
+Current execution results, provenance and intentionally paused service state are recorded in [test-results.md](test-results.md).
 
 The [official Build, Ship, Shape rules](https://amazonappdev2026.devpost.com/rules) and [event FAQs](https://amazonappdev2026.devpost.com/details/faqs) were rechecked on **2026-10-22**. The listed deadline is October 23, 2026 at noon PDT. This checklist records evidence and remaining gates; it is not an entry or an eligibility determination.
 
@@ -19,7 +19,7 @@ corepack pnpm judge:replay --headed
 
 No provider credentials are required. A healthy isolated local Docker/DynamoDB/web3410/worker3411 environment and Chromium are required; this is not a static or in-memory substitute. The runner refuses existing active demo visits: close them deliberately through the UI before another attempt. Each run writes `output/judge-replay/<UTC timestamp>-<id>/result.json`. Bounded local-health preflight failure records **BLOCKED** and exits2; it is not a browser pass. Only a successful actual child browser journey supplies PASS, with `report/index.html`, `journey-observations.json` and screenshots in that run directory.
 
-The actual attempt at `output/judge-replay/2026-10-22T01-50-47-905Z-9f77a4/result.json` recorded **BLOCKED, exit2** because local health/mode prerequisites were unavailable; no browser journey passed. The shared Docker API/listener hang remains unresolved. No shared daemon restart/reset was attempted because other projects must be preserved. See [test-results.md](test-results.md) for historical passes/failures and recovery prerequisites.
+The final actual attempt at `output/judge-replay/2026-10-22T02-19-27-994Z-0ed445/result.json` recorded **PASS, exit0**, with1 browser journey passed in 12.4s. The earlier blocked attempt and guarded active-visit refusal remain recorded in [test-results.md](test-results.md). Only LOCAL/FIXTURE behavior is established; no real Ring or AWS observation is implied. Services are intentionally stopped after verification for sequential handoff.
 
 ## Ring simulator interpretation and provenance
 
