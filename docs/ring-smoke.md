@@ -2,7 +2,7 @@
 
 Current execution results, provenance and intentionally paused service state are recorded in [test-results.md](test-results.md).
 
-**Not executed.** This is a preparation checklist for a later, separately authorized validation. The current request does not authorize obtaining credentials/access, provider or paid calls, publishing/recording a video, inviting reviewers, deploying services or submitting an entry. Do not start a cloud/provider operation merely because this document describes it.
+**Provider smoke not executed.** The current Ring task authorizes read-only discovery. Creating credentials/OAuth grants, configuring ongoing credentials or transmitting bearer secrets still requires specific action-time approval; paid calls remain unauthorized. The Mac browser currently stops at Amazon Developer Registration, as recorded in [ring-access-checkpoint.md](ring-access-checkpoint.md). This checklist does not itself authorize a provider operation, legal acceptance, deployment, publication or submission.
 
 CaptionDoor has no observed actual Ring API call, Playground session or device track. Its credential-free judge replay uses LOCAL fixtures and actual local application/database behavior. The [organizer's replay guidance](https://amazonappdev2026.devpost.com/forum_topics/45541-ring-playground-replay-mode-for-judging-ring-media-in-public-videos-and-simulated-alexa-wording) permits replay by default without requiring a judge to supply a Playground token; it does not turn synthetic responses into prior real validation.
 
