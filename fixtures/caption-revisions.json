@@ -1,0 +1,10 @@
+{
+  "label": "Demo transcript",
+  "source": "FIXTURE",
+  "sampleRate": 16000,
+  "revisions": [
+    { "text": "Do", "isPartial": true },
+    { "text": "Do not", "isPartial": true },
+    { "text": "Do not leave it.", "isPartial": false }
+  ]
+}

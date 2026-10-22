@@ -1,0 +1,67 @@
+# Template only. Do not run on a public host without explicit deployment authorization.
+# Independent file: never combine with local compose.yaml (which contains demo modes/DB).
+name: captiondoor_host
+x-cloud-environment: &cloud-environment
+  NODE_ENV: production
+  AUTH_MODE: oidc
+  RING_MODE: live
+  TRANSCRIBE_MODE: aws
+  APP_ORIGIN: https://${CAPTIONDOOR_DOMAIN:?Set authorized domain}
+  WS_PUBLIC_URL: wss://${CAPTIONDOOR_DOMAIN:?Set authorized domain}/ws
+  AWS_REGION: ${AWS_REGION:?Set approved single region}
+  CAPTIONDOOR_CONFIG_TABLE: CaptionDoorConfig
+  CAPTIONDOOR_VISITS_TABLE: CaptionDoorVisits
+  CAPTIONDOOR_RUNTIME_TABLE: CaptionDoorRuntime
+  WORKER_HOST: 0.0.0.0
+  WORKER_PORT: 3411
+services:
+  web:
+    build: { context: .., dockerfile: Dockerfile.web, target: production }
+    environment: *cloud-environment
+    env_file: [/etc/captiondoor/secrets.env]
+    init: true
+    expose: ["3410"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3410/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+    restart: unless-stopped
+  worker:
+    build: { context: .., dockerfile: Dockerfile.worker, target: production }
+    environment: *cloud-environment
+    env_file: [/etc/captiondoor/secrets.env]
+    init: true
+    expose: ["3411"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3411/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+    restart: unless-stopped
+  proxy:
+    image: caddy:2.11.7-alpine
+    environment:
+      CAPTIONDOOR_DOMAIN: ${CAPTIONDOOR_DOMAIN:?Set authorized domain}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile.aws:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, worker]
+    restart: unless-stopped
+volumes:
+  caddy_data:
+  caddy_config:

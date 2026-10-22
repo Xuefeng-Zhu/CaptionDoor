@@ -1,0 +1,56 @@
+# DynamoDB access model
+
+Designed 2026-10-22 before repository implementation. Three single-Region, on-demand tables with string PK/SK, numeric `expiresAt` (Unix seconds) and delayed TTL backstop. No SQL or in-memory application state. DynamoDB Local uses the identical repository and transactions. Ephemeral sockets/audio buffers are not records of responsibility.
+
+| Table              | PK / SK examples                                                                          | Access                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| CaptionDoorConfig  | HOUSEHOLD#h1 / PROFILE, MEMBER#alex, DOOR#front-door, INTEGRATION#ring                    | Query household membership/doors; strong point reads for authorization/settings/active door                                           |
+| CaptionDoorConfig  | USER#alex / LOOKUP; PUBLICDOOR#front-demo / LOOKUP; RINGACCOUNT#demo-account / LOOKUP     | Direct identity/public-door/linked account lookup; public lookup never exposes household to guest                                     |
+| CaptionDoorVisits  | HOUSEHOLD#h1#VISIT#uuid / STATE, EVENT#paddedVersion#uuid, CAPTION#opaqueMediaId#resultId | Strong visit state and paginated partition history; one item per final caption/event                                                  |
+| CaptionDoorVisits  | HOUSEHOLD#h1#THREAD#uuid / STATE, MESSAGE#serverEpochMs#uuid                              | Guest-specific thread exists before association; messages have one canonical copy; explicit association links thread state to a visit |
+| CaptionDoorRuntime | SESSION#sha256OpaqueSecret / SESSION; HOUSEHOLD#h1#VISIT#uuid / CAPTURE, IDEMPOTENCY#hash | Scoped revocable sessions, one separately authoritative audio lease, durable response idempotency                                     |
+| CaptionDoorRuntime | DEDUP#account#hashDelivery / DELIVERY; SEMANTIC#account#hashEvent / EVENT                 | Account-scoped delivery and semantic dedup in same transaction as accepted press                                                      |
+| CaptionDoorRuntime | JOB#uuid / JOB                                                                            | Durable transactional outbox, explicit retry/lease/dead-letter state                                                                  |
+| CaptionDoorRuntime | RATE#hashedPublicKey#timeBucket / RATE                                                    | Bounded guest creation/message abuse controls; TTL is cleanup, not enforcement                                                        |
+
+## Indexes and consistency
+
+Visits GSI `household-time` keys `gsi1pk`/`gsi1sk`: HOUSEHOLD#id#VISITS or HOUSEHOLD#id#THREADS, epoch-milliseconds#id, newest-first recent listing. GSI listing is eventually consistent, followed by authoritative strong base reads before displaying sensitive visit content or applying permissions. Thread messages use strongly consistent base Query with stable server-time/id sort keys, bounded pages/cursors. Guest list never queries household partitions.
+
+Runtime GSI `due-work` keys `duePk`/`dueSk`: WORK#0 / padded-nextAttemptAt#jobId. The bounded worker queries due work, then strong-reads and conditionally claims each durable item. Future jobs remain indexed; missed dispatch recovers from this GSI. One worker MVP. Cloud Streams KEYS_ONLY forwards only job keys to SQS; stream/SQS delivery is at least once and per-item ordering does not imply transaction/global ordering. Local polling is a transport substitute, not validation of Streams/SQS.
+
+No runtime path uses Scan. Setup/reset may delete known isolated local tables. Household-time does not authorize. Strong reads recheck session expiry, membership expiry/revocation, separate camera/captions/text/membership grants, and content access expiry independent of TTL.
+
+## Transactions and races
+
+Claims condition on expected visit version and UNCLAIMED; the loser rereads strong state and returns 409 with current visit. A command transaction updates state with its condition, writes idempotency response, audit event and outbox job. No transaction ConditionCheck and Update target the same item. Membership freshness conditions participate in sensitive writes. Per-door active pointer is updated conditionally in the same transaction as press state, semantic/delivery dedup, audit and jobs. Concurrent presses cannot create two active visits. Historical button events remain separate audit items. Persistence failure commits neither acceptance nor dedup.
+
+Pending handoff retains original handler. Accept/takeover increments version and fences stale replies, deletes old capture lease atomically. Claim does not reply. Capture requires handler plus explicit consent, separate runtime lease and media-session fence; every frame operation rechecks authorization and expiry. A disconnected socket releases capture only; handler responsibility persists. Final caption keys replace no partials and conditional put persists each result once. Accepted/displayed/confirmed delivery stages are explicit monotonic visitor actions; connection is never acknowledgement.
+
+## Expiry, deletion and retention
+
+Default content access 24 hours; configurable 1–168 hours. Sessions and grants enforce `expiresAt` at request/socket use even before physical TTL cleanup. Default guest session 30 minutes. Every visit/thread schedules an explicit durable deletion job. Access expiry is immediate policy; physical deletion is separate worker progress. A deletion job pages the visit/thread partitions and deletes canonical message/caption/content records and affected access records, with TTL as backstop. Minimal ID/timing/audit metadata can remain only without content. No raw audio/video is recorded. Application backups/provider data may outlive local content removal; privacy documentation states this boundary.
+
+Jobs contain routing IDs, categories and scheduling metadata, never queued transcript/message content. Processing jobs refresh state from the database and honor revocation. Successful completion removes due-work keys; failures record sanitized category, bounded attempts, nextAttemptAt and final DEAD status for operator recovery.
+
+## Household sharing policy
+
+Camera, captions, visitor text and membership are separate member grants. The household `consent.sharing` additionally controls retained conversation sharing between residents. When disabled, only the current handler (retained after closure) can read that visit’s saved captions and messages; other members see state/system events and thread IDs/timestamps without message/category previews. The current active handler may preview unassociated threads for the selected door to make an explicit association. Timing and preview never establish identity. Guest access is unaffected and remains restricted to its own thread. Bootstrap and visit reads recheck this policy from strong config/state reads; withdrawal also fences active capture.
+
+Guest history is bounded to 30 messages per page, newest page first with chronological rendering and an opaque older-page cursor derived only for the authenticated thread. Resident visit pagination maintains independent scoped source cursors and never authorizes from a cursor or GSI. Explicit delivery updates resolve a per-thread runtime message-key lookup, not a table scan.
+
+## Invitation acceptance
+
+Owner-created invitation codes are random opaque secrets; only their SHA-256 key is stored at Runtime INVITE#hash/INVITE, with 24-hour expiry. Verified Cognito/OIDC subjects are supplied only by server code after the identity provider flow, never from a request body. Acceptance atomically consumes the code, conditionally records USER#subject lookup, creates the member and advances PROFILE.membershipVersion. A strong membership query plus this profile condition prevents concurrent accepts from exceeding two active members. Settings writes preserve this membership fence. An identity already belonging to another household cannot move through an invite. The same verified subject may safely retry a consumed code to recover a session; another subject cannot reuse it. Demo authentication cannot accept invitations. Production identity-provider behavior is credential-gated and remains unobserved locally.
+
+Retention-hour changes apply to newly created visits and guest threads. Existing records keep their explicit expiresAt; an explicit delete immediately revokes their access and queues physical removal.
+
+## Chronological reconnect history
+
+Every finalized caption and audit event writes a content-free TIMELINE#paddedServerEpochMs#itemId reference in the same transaction as the canonical content item, state/idempotency/audit/outbox as applicable. A strong descending base-table Query of these references returns the latest 30 records, then strong point reads resolve canonical content. Guest/resident thread message sources likewise query latest 30 descending and render chronologically. Scoped older-page cursors preserve each source; no GSI authorizes or supplies history. Media IDs/result IDs and event version SKs remain canonical identity keys, not chronological sort keys. A query-based, idempotent legacy backfill preserves records created earlier in this local build; it copies only references, then marks historyVersion=2. Physical deletion removes references alongside content. Integration tests use separate CaptionDoorPersistenceTest* and CaptionDoorRingTest* tables on the same real Local service so the running application worker cannot consume their test jobs.
+
+Verified pending OIDC identity records can be passed internally to acceptInvite. Their subject and expiresAt condition is enforced by a conditional Delete in the same transaction that consumes the invitation, creates membership/lookup and writes the new app session. No success can commit with expired or mismatched pending proof; there is no separate post-response session creation.
+
+## Short-lived Ring cleanup credentials
+
+Runtime `MEDIA#householdId#opaqueMediaSessionId / SESSION` stores the allowlisted provider Location, selected device, provider expiry and an encrypted `cleanupCredentials` envelope. The envelope contains only an access token and a `WHEP_DELETE` purpose bound to that media session/device; it contains no refresh token. Its application validity ends at the earliest of provider expiry, token expiry and 60 seconds after creation. The root conservatively uses the 30-second battery duration for all selected devices. A durable close job is written atomically with the media record, including before any browser-ready signal. Cleanup deletes the record and credential copy after confirmed provider DELETE or after the documented provider duration elapses; elapsed expiry is not reported as an observed provider close. Explicit unlink removes Config credentials immediately and does not prevent this narrowly scoped cleanup. TTL is a delayed physical-cleanup backstop, not a 60-second physical-deletion guarantee during outages.

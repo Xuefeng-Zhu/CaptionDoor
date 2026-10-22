@@ -1,0 +1,18 @@
+{
+  admin off
+}
+{$CAPTIONDOOR_DOMAIN} {
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+    Permissions-Policy "microphone=(), geolocation=()"
+    Strict-Transport-Security "max-age=31536000"
+  }
+  handle /ws {
+    reverse_proxy worker:3411
+  }
+  handle {
+    reverse_proxy web:3410
+  }
+}

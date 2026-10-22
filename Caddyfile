@@ -1,0 +1,19 @@
+{
+  admin off
+  auto_https disable_redirects
+}
+{$CAPTIONDOOR_TLS_ADDRESS:https://localhost:3443} {
+  tls internal
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+    Permissions-Policy "microphone=(), geolocation=()"
+  }
+  handle /ws {
+    reverse_proxy worker:3411
+  }
+  handle {
+    reverse_proxy web:3410
+  }
+}

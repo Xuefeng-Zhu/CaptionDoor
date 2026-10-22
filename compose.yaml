@@ -1,0 +1,105 @@
+name: captiondoor_local
+x-app-environment: &local-environment
+  NODE_ENV: development
+  AUTH_MODE: demo
+  RING_MODE: demo
+  TRANSCRIBE_MODE: fixture
+  AWS_REGION: us-east-1
+  DYNAMODB_ENDPOINT: http://dynamodb:8000
+  CAPTIONDOOR_CONFIG_TABLE: CaptionDoorConfig
+  CAPTIONDOOR_VISITS_TABLE: CaptionDoorVisits
+  CAPTIONDOOR_RUNTIME_TABLE: CaptionDoorRuntime
+  APP_ORIGIN: ${APP_ORIGIN:-http://127.0.0.1:3410}
+  WS_PUBLIC_URL: ${WS_PUBLIC_URL:-ws://127.0.0.1:3411/ws}
+  WORKER_PORT: 3411
+  WORKER_HOST: 0.0.0.0
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.2
+    command:
+      [
+        "-jar",
+        "DynamoDBLocal.jar",
+        "-sharedDb",
+        "-dbPath",
+        "./data",
+        "-disableTelemetry",
+      ]
+    working_dir: /home/dynamodblocal
+    user: root
+    ports:
+      - "127.0.0.1:8410:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
+    restart: unless-stopped
+  web:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: local
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment: *local-environment
+    depends_on: [dynamodb]
+    ports:
+      - "127.0.0.1:3410:3410"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3410/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+    restart: unless-stopped
+  worker:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+      target: local
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment: *local-environment
+    depends_on: [dynamodb]
+    ports:
+      - "127.0.0.1:3411:3411"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3411/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 4
+    restart: unless-stopped
+  proxy:
+    profiles: [https]
+    image: caddy:2.11.7-alpine
+    environment:
+      CAPTIONDOOR_TLS_ADDRESS: ${CAPTIONDOOR_TLS_ADDRESS:-https://localhost:3443}
+    ports:
+      - "127.0.0.1:3443:3443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, worker]
+    restart: unless-stopped
+volumes:
+  dynamodb_data:
+  caddy_data:
+  caddy_config:

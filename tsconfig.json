@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@captiondoor/domain": ["packages/domain/src/index.ts"],
+      "@captiondoor/db": ["packages/db/src/index.ts"],
+      "@captiondoor/contracts": ["packages/contracts/src/index.ts"],
+      "@captiondoor/integrations": ["packages/integrations/src/index.ts"],
+      "@captiondoor/integrations/*": ["packages/integrations/src/*"]
+    }
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "infra/**/*.ts"
+  ],
+  "exclude": ["node_modules", "apps/web/.next", "output"]
+}

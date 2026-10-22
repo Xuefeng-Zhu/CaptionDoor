@@ -1,0 +1,25 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+output/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+
+# Never commit local persistence, credentials, authentication captures or build caches.
+.aws/
+playwright/.auth/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+*.har
+*.trace
+*.tsbuildinfo

@@ -1,0 +1,32 @@
+FROM node:24.14.1-bookworm-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@12.14.0 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY apps/worker/package.json ./apps/worker/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/db/package.json ./packages/db/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/integrations/package.json ./packages/integrations/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+FROM base AS local
+ENV NODE_ENV=development
+EXPOSE 3410
+CMD ["pnpm", "--filter", "@captiondoor/web", "exec", "next", "dev", "--hostname", "0.0.0.0", "--port", "3410"]
+FROM base AS build
+# These explicit modes permit compilation; no credentials or external calls occur during build.
+ENV NODE_ENV=production
+RUN pnpm build
+FROM node:24.14.1-bookworm-slim AS production
+WORKDIR /app
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3410
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
+USER node
+EXPOSE 3410
+CMD ["node", "apps/web/server.js"]

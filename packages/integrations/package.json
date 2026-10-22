@@ -1,0 +1,15 @@
+{
+  "name": "@captiondoor/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./push": "./src/push.ts",
+    "./ring": "./src/ring.ts",
+    "./browser-ring": "./src/browser-ring.ts",
+    "./audio/browser": "./src/audio/browser.ts",
+    "./crypto": "./src/crypto.ts",
+    "./media-cleanup": "./src/media-cleanup.ts"
+  }
+}

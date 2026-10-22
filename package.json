@@ -1,0 +1,59 @@
+{
+  "name": "captiondoor",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "setup:local": "tsx scripts/setup-local.ts",
+    "dev": "tsx scripts/dev.ts",
+    "check": "tsc --noEmit && vitest run tests/unit",
+    "build": "tsx scripts/build.ts",
+    "test:integration": "vitest run tests/integration --maxWorkers=1",
+    "test:e2e": "playwright test",
+    "demo:reset": "tsx scripts/setup-local.ts --reset",
+    "infra:synth": "cdk synth --app \"tsx infra/cdk/app.ts\" --output output/cdk",
+    "worker": "tsx apps/worker/src/index.ts",
+    "format": "prettier --write apps packages infra scripts tests fixtures docs README.md package.json tsconfig.json playwright.config.ts vitest.config.ts",
+    "test:recovery": "tsx tests/recovery/worker-restart.ts",
+    "judge:replay": "tsx scripts/judge-replay.ts"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "@aws-sdk/client-dynamodb": "3.1155.0",
+    "@aws-sdk/lib-dynamodb": "3.1155.0",
+    "@aws-sdk/client-transcribe-streaming": "3.1155.0",
+    "@aws-sdk/client-sqs": "3.1155.0",
+    "@aws-sdk/client-kms": "3.1155.0",
+    "zod": "4.6.7",
+    "ws": "8.22.0",
+    "openid-client": "6.8.8",
+    "web-push": "3.6.7",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsx": "4.23.15",
+    "vitest": "5.0.5",
+    "@playwright/test": "1.64.1",
+    "@axe-core/playwright": "4.14.0",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/ws": "8.18.1",
+    "@types/web-push": "3.6.4",
+    "@types/qrcode": "1.5.6",
+    "tailwindcss": "3.4.19",
+    "postcss": "8.5.6",
+    "autoprefixer": "10.4.22",
+    "aws-cdk-lib": "2.274.0",
+    "aws-cdk": "2.1146.0",
+    "constructs": "10.8.1",
+    "prettier": "3.9.10"
+  },
+  "type": "module"
+}

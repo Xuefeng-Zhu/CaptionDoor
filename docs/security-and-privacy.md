@@ -1,0 +1,39 @@
+# Security and privacy
+
+## Boundaries and identities
+
+App sign-in is separate from Ring account linking. Production uses Cognito OIDC through a maintained OIDC library; local demo identities exist only behind explicit demo mode. Production rejects demo authentication and fixture/simulator combinations. The server derives household/user from a hashed opaque session, rechecks base-table membership and application expiry, and never trusts request-supplied user/household identifiers. Correctness and authorization use strong base-table reads, not GSI snapshots. Browser sockets recheck ongoing authorization; revocation and expiry end subscriptions/capture.
+
+Membership, visitor text, captions and camera are distinct grants. Every resident read/write/subscription applies tenant and grant checks. A public door code is an entrance, not identity, occupancy or presence evidence. Each guest browser receives a cryptographically random, scoped, short-lived, revocable secret; only its hash persists. A guest cannot enumerate household identity, members, other threads, captions, video or occupancy. The resident explicitly associates a thread with a visit. A guest message contains bounded plaintext only, never HTML, attachments or scripts.
+
+HTTP sessions use HttpOnly SameSite cookies, Secure under HTTPS. Mutating requests require allowed Origin and CSRF proof; redirects are constrained. Public session/message endpoints have bounds and rate limits. API errors use stable categories and request IDs. WebSocket upgrade requires an authenticated cookie and matching Origin; every subscription and sensitive operation reauthorizes. Heartbeats, payload limits, backpressure and bounded buffers prevent a disconnected browser from accumulating delayed live audio. Authentication/authorization failures are denials, not silent local fallbacks.
+
+## Human decisions and communication
+
+Exactly one handler can send for a visit, and a separate authorized capture lease controls audio. Handoff acceptance/takeover changes the fence; stale replies/audio are rejected. A pending handoff retains the original handler until acceptance or authorized takeover. Losing connection stops media capture while responsibility stays visible. Replies always require an explicit send action and reach the visitor web page; no Ring speaker, unlocking, automated/LLM replies, facial/emotion identification or emergency diagnosis exists.
+
+ACCEPTED means the server persisted a reply. DISPLAYED means the visitor page actually rendered it while visible. CONFIRMED means an explicit visitor **Got it** action. None proves person identity, comprehension or physical presence. Caption **Finalized** means the recognition segment ended, not that the words are correct. Distinct sources and uncertainty remain visible.
+
+## Consent, content and secrets
+
+Ring processing, AWS third-party transcription, household sharing and retention choices are separate disclosures/controls. A resident must deliberately select incoming remote audio after consent. AWS processes that audio for transcription in AWS mode. No resident or visitor microphone is used, and the application makes no audio/video recordings. No continuous monitoring occurs. Optional media failure does not block visitor text.
+
+Ring credentials remain backend-only and encrypted before persistent storage. Cloud uses KMS credential encryption; development uses a separately generated local key from an ignored environment file. No usable credential key ships in the repository. Credentials, guest/app tokens, media signaling secrets and private content must never appear in NEXT_PUBLIC variables, localStorage, logs, screenshots or committed files. The credential KMS key and table encryption serve separate purposes. Cloud IAM grants are limited to the named tables/indexes, specific job queue and credential key; Transcribe's streaming action requires its service-supported resource scope. No table Scan or cloud administration is granted to runtime.
+
+Webhooks verify the exact raw bytes with documented X-Signature HMAC-SHA256 in constant time before parsing JSON. Only a known linked account/device can create a visit. Delivery and semantic event dedup are account scoped and transactionally persisted with state/audit/outbox. Failed persistence is retryable and must not acknowledge successful dedup. WHEP redirects/Locations are constrained to an allowlisted Ring origin/path. Server-owned opaque session IDs prevent a browser from choosing arbitrary signaling destinations. Encryption-protected/unsupported devices remain visibly unavailable; the app never asks a user to disable encryption.
+
+## Retention and deletion
+
+The default content-access window is 24 hours, configurable. `expiresAt` is enforced in application reads, writes and existing sockets even when an expired item still physically exists. DynamoDB TTL can run days later and is only a cleanup backstop. Durable explicit deletion jobs delete content items/copies in the application tables; their completion must be verified independently of an access-denied result. Application jobs retain minimal IDs/status needed to finish and audit cleanup, without copying transcripts/message bodies.
+
+Unlink/revocation fences current media/capture and blocks pending access-sensitive work. Deletion must also cover associated guest-thread content and any derived copies. Providers and configured backups may retain data under their own policies; this project cannot promise immediate physical deletion from a Ring/AWS provider or retained backup. No recording archive exists in CaptionDoor. Production backups are not enabled by the initial CDK template; if enabled later, their lifecycle and restore-time re-deletion obligations need review. Caddy certificate keys stay in its dedicated persistent volume, not the application tables.
+
+## Logging, PWA and operational limits
+
+Log IDs, duration, state transitions and sanitized error categories only. Never log webhook raw bodies, caption/message text, cookies, OAuth codes/tokens or SDP. A provider accepting a Web Push request does not prove display or acknowledgement. Permission is opt-in and user initiated; feature-detect iOS Home Screen and browser restrictions. The offline shell states that it cannot receive live alerts; cache storage must never contain private APIs, transcripts, media, tokens or session pages.
+
+WCAG 2.2 AA is the design target, not a certification. Automated axe checks complement manual keyboard, focus, zoom, 320 px layout and reduced-motion verification. No sound-, color- or motion-only status, flashing alert or fabricated speaker label is acceptable. See [test-results.md](test-results.md) for actual observations and skips. This document describes the intended boundary; unobserved cloud/device behavior remains a release blocker, not a passed security claim.
+
+## Cleanup after unlink
+
+Before a receive-only provider media session is exposed to the browser, CaptionDoor secures a short-lived encrypted Runtime cleanup copy containing an access token only. It is bound to `WHEP_DELETE`, the household/integration context, selected device and opaque media ID. It cannot refresh tokens, recreate Config credentials, discover devices or start media; the cleanup handler only issues DELETE to the stored allowlisted Ring session URL. Its validity is capped at the earliest of token expiry, provider session expiry and 60 seconds. Explicit unlink atomically removes the main encrypted Config credentials; cleanup remains able to close the already-created session. Successful cleanup deletes the Runtime copy. A durable scheduled job also removes it after provider expiry, while TTL remains a delayed backstop. During worker/database outages physical removal can lag logical expiry; no immediate physical-deletion promise is inferred from expired access.

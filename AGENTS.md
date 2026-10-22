@@ -1,0 +1,2 @@
+# CaptionDoor
+Follow the user specification in docs. DynamoDB is the only persistent application database. Never deploy, publish, push or submit without explicit authorization. Never touch other projects or shared services. Use captiondoor_local Compose project, ports 3410 (web), 3411 (worker), 8410 (DB), 3443 (HTTPS). Do not claim Ring/AWS/device observations from local fixture results. Browser-safe types live in domain/contracts; DB/integration SDKs stay server side. Tests use actual DynamoDB Local. No scans in runtime request/job paths.

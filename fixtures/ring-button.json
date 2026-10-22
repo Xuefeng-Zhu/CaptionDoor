@@ -1,0 +1,17 @@
+{
+  "provenance": "LOCAL_ONLY_TEMPLATE_NOT_PROVIDER_EVIDENCE",
+  "meta": {
+    "version": "1.1",
+    "account_id": "demo-account",
+    "request_id": "LOCAL_DELIVERY_ID"
+  },
+  "data": {
+    "id": "LOCAL_SEMANTIC_EVENT_ID",
+    "type": "button_press",
+    "attributes": {
+      "source": "front-door",
+      "source_type": "devices",
+      "timestamp": 0
+    }
+  }
+}

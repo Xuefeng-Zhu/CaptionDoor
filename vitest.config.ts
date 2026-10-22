@@ -1,0 +1,26 @@
+import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+const sources = fileURLToPath(
+  new URL("./packages/integrations/src/", import.meta.url),
+);
+export default defineConfig({
+  resolve: {
+    alias: [
+      ...["domain", "contracts", "db", "integrations"].map((name) => ({
+        find: new RegExp(`^@captiondoor/${name}$`),
+        replacement: fileURLToPath(
+          new URL(`./packages/${name}/src/index.ts`, import.meta.url),
+        ),
+      })),
+      {
+        find: /^@captiondoor\/integrations\/(.*)$/,
+        replacement: `${sources}$1.ts`,
+      },
+    ],
+  },
+  test: {
+    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
+  },
+});
