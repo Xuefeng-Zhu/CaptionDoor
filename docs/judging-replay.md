@@ -1,5 +1,7 @@
 # Reproduce the LOCAL judge journey
 
+**Latest checkpoint (2026-10-22 UTC):** The user-approved normal Docker stop/start succeeded after the other project was paused. Only CaptionDoor ran during recovery. Both health endpoints passed and the post-restart real DynamoDB integration suite passed41/41 in9.73s. The user then prioritized pushing source before further tests: the full12-case browser rerun and judge replay are pending, not passes. CaptionDoor web, worker and DynamoDB containers are now deliberately stopped for sequential handoff; the named database volume is preserved. No further builds/tests were launched after that priority change.
+
 Prepared **2026-10-22 UTC**. Run `corepack pnpm judge:replay` to exercise CaptionDoor’s existing browser journey against its real local HTTP APIs, authenticated WebSockets, Node worker and DynamoDB Local. No Ring Playground token, AWS account or cloud credentials are required for this **LOCAL** run.
 
 “Replay” means a reproducible run of the product flow. It is **not a recording or replay of an earlier real Ring session**. The doorbell event is signed synthetic LOCAL input; media state is a LOCAL_FIXTURE; the words are a FIXTURE **Demo transcript**. Actual Ring runtime evidence remains absent.

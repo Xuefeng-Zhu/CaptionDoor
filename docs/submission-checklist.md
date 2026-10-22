@@ -1,5 +1,7 @@
 # Submission readiness (submission remains unauthorized)
 
+**Latest checkpoint (2026-10-22 UTC):** The user-approved normal Docker stop/start succeeded after the other project was paused. Only CaptionDoor ran during recovery. Both health endpoints passed and the post-restart real DynamoDB integration suite passed41/41 in9.73s. The user then prioritized pushing source before further tests: the full12-case browser rerun and judge replay are pending, not passes. CaptionDoor web, worker and DynamoDB containers are now deliberately stopped for sequential handoff; the named database volume is preserved. No further builds/tests were launched after that priority change.
+
 The [official Build, Ship, Shape rules](https://amazonappdev2026.devpost.com/rules) and [event FAQs](https://amazonappdev2026.devpost.com/details/faqs) were rechecked on **2026-10-22**. The listed deadline is October 23, 2026 at noon PDT. This checklist records evidence and remaining gates; it is not an entry or an eligibility determination.
 
 The user's latest authorization permits creating and pushing a **private GitHub source repository under the verified account `Xuefeng-Zhu`**. Repository creation, source review and remote/private-visibility verification are recorded in [test-results.md](test-results.md). Public repository visibility, reviewer invitations, public video publication, external deployment and hackathon submission remain unauthorized.

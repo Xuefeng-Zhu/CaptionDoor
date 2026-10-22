@@ -1,6 +1,8 @@
 # CaptionDoor English demo script — under three minutes
 
-Prepare before starting the clock: follow [judging-replay.md](judging-replay.md), check both health endpoints, and open independent Alex, Sam and guest browser contexts. Review the three separate local consent settings. Manually close any previous active demo visit with an honest outcome. The guest URL is `http://127.0.0.1:3410/door/front-demo`; a second ordinary tab sharing cookies does not demonstrate isolation. No new passing replay is claimed while the runtime blocker in [test-results.md](test-results.md) remains.
+**Latest checkpoint (2026-10-22 UTC):** The user-approved normal Docker stop/start succeeded after the other project was paused. Only CaptionDoor ran during recovery. Both health endpoints passed and the post-restart real DynamoDB integration suite passed41/41 in9.73s. The user then prioritized pushing source before further tests: the full12-case browser rerun and judge replay are pending, not passes. CaptionDoor web, worker and DynamoDB containers are now deliberately stopped for sequential handoff; the named database volume is preserved. No further builds/tests were launched after that priority change.
+
+Prepare before starting the clock: follow [judging-replay.md](judging-replay.md), check both health endpoints, and open independent Alex, Sam and guest browser contexts. Review the three separate local consent settings. Manually close any previous active demo visit with an honest outcome. The guest URL is `http://127.0.0.1:3410/door/front-demo`; a second ordinary tab sharing cookies does not demonstrate isolation. No new passing replay is claimed; verification is paused for the user-requested source push and sequential handoff recorded in [test-results.md](test-results.md).
 
 Use only synthetic demo material and keep all credentials/session material out of the recording. This is a narration plan, not authorization to publish video or submit an entry.
 

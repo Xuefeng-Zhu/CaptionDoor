@@ -4,7 +4,7 @@
 
 CaptionDoor is an accessibility-first local application for a household's selected door. It runs a real persisted journey: a doorbell event creates a visible alert, a resident claims responsibility, available captions stay separate from visitor text, a resident explicitly sends a reply to a private visitor page, the visitor can choose **Got it**, and the resident explicitly closes the visit.
 
-This checkout is at `/Users/frank/mygit/CaptionDoor`. It was created after a case-insensitive search found no existing CaptionDoor directory. No other project, shared database, public repository, cloud deployment or hackathon submission is part of this work. A subsequent instruction authorized the separate private source repository. The latest expanded browser rerun is blocked by an unresponsive shared Docker server; earlier local passes and exact recovery prerequisites are recorded in docs/test-results.md.
+This checkout is at `/Users/frank/mygit/CaptionDoor`. It was created after a case-insensitive search found no existing CaptionDoor directory. No other project, shared database, public repository, cloud deployment or hackathon submission is part of this work. A subsequent instruction authorized the separate private source repository. The Docker interruption recovered after an approved normal restart; health checks and41integration tests passed afterward. CaptionDoor is deliberately stopped for sequential project handoff. The final12-case browser rerun and judge replay remain pending because the user prioritized source push. Exact results and restart instructions are in docs/test-results.md.
 
 ## Run the credential-free local demo
 
@@ -64,7 +64,7 @@ corepack pnpm judge:replay
 corepack pnpm infra:synth
 ```
 
-The credential-free `judge:replay` command runs one synthetic journey through actual local services, preserves nonzero failures and writes a new timestamped evidence directory per attempt. It refuses production/provider modes and existing active demo visits; deliberately close the current local visit first. See [docs/judging-replay.md](docs/judging-replay.md). Its latest attempt is BLOCKED by the current Docker runtime outage, not counted as passing.
+The credential-free `judge:replay` command runs one synthetic journey through actual local services, preserves nonzero failures and writes a new timestamped evidence directory per attempt. It refuses production/provider modes and existing active demo visits; deliberately close the current local visit first. See [docs/judging-replay.md](docs/judging-replay.md). Its recorded attempt was BLOCKED during the earlier Docker outage. Docker recovered, but replay has not been rerun because the user prioritized pushing and sequential handoff; no replay pass is claimed.
 
 Integration tests require the real local database on port8410; browser tests also require web3410 and worker3411. They create isolated fixtures/threads. `test:recovery` requires the main CaptionDoor worker to be stopped first; it starts/stops only its own child worker and refuses an occupied port. It verifies a durable job across a real process restart.
 
