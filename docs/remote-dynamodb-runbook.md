@@ -1,5 +1,7 @@
 # CaptionDoor remote DynamoDB development runbook
 
+**Scope note — 2026-10-23:** this ordinary `remote-demo` database plan is separate from the executed [dedicated remote provider test](remote-provider-session.md). Its table names, non-root access plan and pending approvals remain distinct.
+
 Prepared 2026-10-22 UTC. **This is an approval-ready database proposal, not a completed migration.** The application remains on its preserved local database until the resource, identity and smoke-test scope below are explicitly approved. A successful offline synth or DynamoDB Local test is not evidence of a deployed AWS table, working AWS permission or remote persistence.
 
 ## Verified account facts and decisions still needed

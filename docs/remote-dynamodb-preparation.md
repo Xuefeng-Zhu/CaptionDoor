@@ -1,5 +1,7 @@
 # Remote DynamoDB preparation — locally verified, AWS cutover pending
 
+**Scope note — 2026-10-23:** this historical preparation targets ordinary `remote-demo` tables (`CaptionDoorDevConfig`, `CaptionDoorDevVisits`, `CaptionDoorDevRuntime`), whose cutover remains pending. The later executed dedicated provider-test stack uses different names and scope; see [remote-provider-session.md](remote-provider-session.md). Its approval does not activate this proposal.
+
 Checkpoint: **2026-10-22 UTC**. Work remains on the Mac at `/Users/frank/mygit/CaptionDoor`. The sequential CaptionDoor preparation is complete and its owned services are stopped; DoorDesk can be prepared next. This checkpoint does not authorize resource creation or establish remote persistence.
 
 ## Completed code and local verification

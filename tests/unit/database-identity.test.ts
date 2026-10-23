@@ -35,6 +35,32 @@ describe("AWS database identity fence with mocked identity/transport, no AWS cal
       status: 503,
     });
   });
+  it("permits an exact root identity only with a separately validated root option", async () => {
+    const root = { Account: account, Arn: `arn:aws:iam::${account}:root` };
+    await expect(
+      createAwsIdentityGuard(account, async () => root)(),
+    ).rejects.toMatchObject({
+      code: "AWS_DATABASE_IDENTITY_UNVERIFIED",
+    });
+    await expect(
+      createAwsIdentityGuard(account, async () => root, { allowRoot: false })(),
+    ).rejects.toMatchObject({ code: "AWS_DATABASE_IDENTITY_UNVERIFIED" });
+    await expect(
+      createAwsIdentityGuard(account, async () => root, { allowRoot: true })(),
+    ).resolves.toBeUndefined();
+    for (const identity of [
+      { Account: "999999999999", Arn: root.Arn },
+      { Account: account, Arn: "arn:aws:iam::999999999999:root" },
+      { Account: account, Arn: `arn:aws:sts::${account}:root` },
+      { Account: account, Arn: `arn:aws-cn:iam::${account}:root` },
+      { Account: account, Arn: `arn:aws:iam::${account}:root/other` },
+    ])
+      await expect(
+        createAwsIdentityGuard(account, async () => identity, {
+          allowRoot: true,
+        })(),
+      ).rejects.toMatchObject({ code: "AWS_DATABASE_IDENTITY_UNVERIFIED" });
+  });
   it("shares one successful check across concurrent operations", async () => {
     let finish!: (value: AwsIdentity) => void;
     const load = vi.fn(

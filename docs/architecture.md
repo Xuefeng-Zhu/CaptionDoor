@@ -50,7 +50,9 @@ The default `.invalid` cloud origin is deliberate. Actual HTTPS callbacks, appro
 
 ## Costs, deletion and shutdown
 
-No billable resources are deployed by local scripts. A future authorized cloud deployment incurs host, DynamoDB, KMS, SQS/Lambda, Cognito and Transcribe charges based on usage; no price estimate has been measured here. Raw media is not recorded. Logs must contain IDs/timing/transitions and sanitized error categories only.
+Local setup deploys no billable resources. A separately approved provider test created three dedicated AWS DynamoDB tables; its completed attempt and exact own-data cleanup are recorded in [remote-provider-session.md](remote-provider-session.md). Those tables and budget metadata remain retained and can continue to incur storage charges. Its Mac worker used a five-second due-index poller; no public host or cloud dispatch consumer was deployed. The ordinary database-only `remote-demo` plan remains separate and unexecuted.
+
+A full application deployment would add its configured compute, KMS, queue, identity and transcription costs. Review allowances are not hard billing caps; actual AWS billing has not been observed. Raw media is not recorded. Logs must contain IDs/timing/transitions and sanitized error categories only.
 
 To stop only this local project, use `docker compose -p captiondoor_local --profile app --profile https down` from this checkout. This preserves the named local database volume. `pnpm demo:reset` is destructive only to CaptionDoor's explicitly validated local tables; it refuses cloud endpoints. Do not use global Docker prune/stop commands.
 

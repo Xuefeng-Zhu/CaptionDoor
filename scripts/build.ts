@@ -3,6 +3,14 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
+const compilerArgs = process.argv.slice(2);
+if (
+  compilerArgs.length &&
+  !(compilerArgs.length === 1 && compilerArgs[0] === "--webpack")
+)
+  throw new Error(
+    "Build accepts only the optional --webpack compiler selector.",
+  );
 // Compile production artifacts without running providers or weakening runtime mode checks.
 // Build children cannot inherit a developer's AWS session or credential providers.
 const buildEnv = { ...process.env };
@@ -16,7 +24,7 @@ for (const key of Object.keys(buildEnv))
     delete buildEnv[key];
 const child = spawn(
   process.execPath,
-  [`${root}node_modules/next/dist/bin/next`, "build"],
+  [`${root}node_modules/next/dist/bin/next`, "build", ...compilerArgs],
   {
     cwd: `${root}apps/web`,
     stdio: "inherit",

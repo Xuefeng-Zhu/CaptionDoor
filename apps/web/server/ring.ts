@@ -28,6 +28,10 @@ import {
   ringClientForHousehold,
   createMediaCleanupCredentials,
 } from "@captiondoor/integrations/media-cleanup";
+import {
+  beginProviderMediaCheckpoint,
+  bindProviderMediaCheckpoint,
+} from "../../../packages/integrations/src/provider-media-checkpoint";
 import { origin, hash } from "./http";
 import {
   getOrCreateRingClientIdentity,
@@ -654,6 +658,7 @@ export async function startMedia(
   visitId: string,
   offer: string,
 ) {
+  const checkpoint = await beginProviderMediaCheckpoint(visitId);
   let actor = await service.refreshActor(inputActor, "camera");
   const current = await service.getVisit(actor, visitId),
     boot = await service.bootstrap(actor);
@@ -695,6 +700,7 @@ export async function startMedia(
     randomUUID(),
   );
   const mediaSessionId = visit.mediaSessionId!;
+  if (checkpoint) await bindProviderMediaCheckpoint(checkpoint, mediaSessionId);
   const key = {
     PK: `MEDIA#${actor.householdId}#${mediaSessionId}`,
     SK: "SESSION",

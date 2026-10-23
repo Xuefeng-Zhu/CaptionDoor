@@ -4,6 +4,10 @@ import {
   issueRootSmokePermit,
   rootSmokeReceipt,
 } from "../../../packages/integrations/src/audio/root-smoke-permit";
+import {
+  issueRemoteProviderPermit,
+  remoteProviderSmokeReceipt,
+} from "../../../packages/integrations/src/audio/remote-provider-permit";
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -21,7 +25,7 @@ import {
 import {
   AppError,
   validateModes,
-  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
   type Actor,
   type ConversationItem,
   type Visit,
@@ -69,10 +73,11 @@ if (["localhost", "127.0.0.1"].includes(new URL(appOrigin).hostname))
     allowedOrigins.add(origin);
 function providerSmokeEnabled() {
   try {
-    const { tablePrefix } = assertProviderSmokeEnvironment(process.env);
+    const { tablePrefix } = assertActiveProviderSmokeEnvironment(process.env);
+    const remote = process.env.CAPTIONDOOR_ENV === "remote-provider";
     return (
-      databaseConfig.mode === "local" &&
-      databaseConfig.environment === "local" &&
+      databaseConfig.mode === (remote ? "aws" : "local") &&
+      databaseConfig.environment === (remote ? "remote-provider" : "local") &&
       appOrigin === "http://127.0.0.1:3410" &&
       tables.config === `${tablePrefix}Config` &&
       tables.visits === `${tablePrefix}Visits` &&
@@ -396,6 +401,19 @@ async function handleMessage(
                 }),
               )
             : undefined;
+        const remotePermit =
+          process.env.CAPTIONDOOR_ENV === "remote-provider"
+            ? issueRemoteProviderPermit(
+                await service.reserveRemoteProviderSmokeAttempt(
+                  actor,
+                  message.visitId,
+                  {
+                    leaseId: message.leaseId,
+                    mediaSessionId: message.mediaSessionId,
+                  },
+                ),
+              )
+            : undefined;
         if (connection.ws.readyState !== WebSocket.OPEN)
           throw new AppError(
             "CONNECTION_ENDED",
@@ -434,6 +452,7 @@ async function handleMessage(
             void stopCapture(connection, category);
           },
           rootPermit,
+          remotePermit,
         );
         const capture: Capture = {
           ...message,
@@ -467,6 +486,12 @@ async function handleMessage(
                 ...(rootPermit
                   ? { rootSmoke: rootSmokeReceipt(rootPermit) }
                   : {}),
+                ...(remotePermit
+                  ? {
+                      remoteProviderSmoke:
+                        remoteProviderSmokeReceipt(remotePermit),
+                    }
+                  : {}),
               });
             },
           });
@@ -496,6 +521,13 @@ const server = createServer(async (request, response) => {
           status: "ok",
           worker: "single",
           providerSmoke: providerSmokeEnabled(),
+          providerSessionId:
+            providerSmokeEnabled() &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              process.env.CAPTIONDOOR_PROVIDER_SESSION_ID || "",
+            )
+              ? process.env.CAPTIONDOOR_PROVIDER_SESSION_ID
+              : undefined,
           providerSmokeTablePrefix: providerSmokeEnabled()
             ? tables.config.slice(0, -6)
             : undefined,

@@ -331,7 +331,12 @@ async function run(req: Request, context: Context) {
   }
   if (method === "GET" && route === "provider-smoke/budget") {
     assertProviderSmokeRuntime();
-    return json(await service.getRootSmokeBudget(await actor(req)));
+    const who = await actor(req);
+    return json(
+      process.env.CAPTIONDOOR_ENV === "remote-provider"
+        ? await service.getRemoteProviderSmokeBudget(who)
+        : await service.getRootSmokeBudget(who),
+    );
   }
   if (method === "POST" && route === "provider-smoke/press")
     assertProviderSmokeRuntime();

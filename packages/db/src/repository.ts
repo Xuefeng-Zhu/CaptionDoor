@@ -2,6 +2,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { resolveDatabaseConfig, databaseClientOptions } from "./config";
 import { installAwsIdentityGuard } from "./aws-identity";
+import { installTemporaryRemoteDatabaseCredentialsGuard } from "./temporary-remote-credentials";
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -15,7 +16,11 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { AppError, validateModes } from "@captiondoor/domain";
+import {
+  AppError,
+  validateModes,
+  assertRemoteProviderSmokeEnvironment,
+} from "@captiondoor/domain";
 // Private local files are development-only; production receives process environment.
 // Do not let the production file tracer copy a private .env into standalone output.
 if (
@@ -41,6 +46,11 @@ export const databaseConfig = resolveDatabaseConfig(process.env);
 export const tables = databaseConfig.tables;
 export const client = new DynamoDBClient(databaseClientOptions(databaseConfig));
 if (databaseConfig.mode === "aws") {
+  const remotePolicy =
+    databaseConfig.environment === "remote-provider"
+      ? assertRemoteProviderSmokeEnvironment(process.env)
+      : undefined;
+  if (remotePolicy) installTemporaryRemoteDatabaseCredentialsGuard(client);
   const identity = new STSClient({
     region: databaseConfig.region,
     credentials: client.config.credentials,
@@ -48,10 +58,16 @@ if (databaseConfig.mode === "aws") {
     ignoreConfiguredEndpointUrls: true,
   });
   // DocumentClient inherits this guard. STS uses the same normal credential provider.
-  installAwsIdentityGuard(client, databaseConfig.accountId!, () =>
-    identity.send(new GetCallerIdentityCommand({}), {
-      abortSignal: AbortSignal.timeout(5000),
-    }),
+  installAwsIdentityGuard(
+    client,
+    databaseConfig.accountId!,
+    async () => {
+      if (remotePolicy) await client.config.credentials();
+      return identity.send(new GetCallerIdentityCommand({}), {
+        abortSignal: AbortSignal.timeout(5000),
+      });
+    },
+    { allowRoot: remotePolicy?.allowRoot === true },
   );
 }
 export const db = DynamoDBDocumentClient.from(client, {

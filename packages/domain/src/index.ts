@@ -167,8 +167,17 @@ export function validateModes(env: Record<string, string | undefined>) {
     throw new Error("Invalid TRANSCRIBE_MODE");
 }
 
-export { assertProviderSmokeEnvironment } from "./provider-smoke";
+export {
+  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
+} from "./provider-smoke";
 export type { ProviderSmokeEnvironment } from "./provider-smoke";
+
+export {
+  assertRemoteProviderSmokeEnvironment,
+  remoteProviderSmokeConfig,
+} from "./remote-provider-smoke";
+export type { RemoteProviderSmokeConfig } from "./remote-provider-smoke";
 
 export { assertRootSmokeEnvironment, rootSmokeConfig } from "./root-smoke";
 export type { RootSmokeConfig } from "./root-smoke";

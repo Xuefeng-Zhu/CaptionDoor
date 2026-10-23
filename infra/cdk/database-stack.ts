@@ -18,7 +18,7 @@ export type CaptionDoorDatabaseStackProps = StackProps & {
   tablePrefix?: string;
 };
 
-/** Separate remote-demo namespace; never silently target local or production tables. */
+/** Separate development namespaces; never silently target local or production tables. */
 export function validateDatabaseDeploymentTarget(
   account: unknown,
   region: unknown,
@@ -30,10 +30,18 @@ export function validateDatabaseDeploymentTarget(
     throw new Error("An explicit database AWS Region is required.");
   if (
     typeof prefix !== "string" ||
-    !/^CaptionDoorDev(?:-[a-z0-9][a-z0-9-]{0,39})?$/.test(prefix)
+    (!/^CaptionDoorDev(?:-[a-z0-9][a-z0-9-]{0,39})?$/.test(prefix) &&
+      prefix !== "CaptionDoorDevProviderSmoke20261023")
   )
     throw new Error(
-      "Database table prefix must be CaptionDoorDev or CaptionDoorDev-<lowercase suffix>.",
+      "Database table prefix must use the approved development namespace.",
+    );
+  if (
+    prefix === "CaptionDoorDevProviderSmoke20261023" &&
+    (account !== "256604024085" || region !== "us-east-1")
+  )
+    throw new Error(
+      "The remote provider namespace requires its exact approved account and Region.",
     );
   return { account, region, tablePrefix: prefix };
 }
@@ -55,9 +63,17 @@ export class CaptionDoorDatabaseStack extends Stack {
       env: { account: target.account, region: target.region },
       analyticsReporting: false,
     });
+    const providerSmoke =
+      target.tablePrefix === "CaptionDoorDevProviderSmoke20261023";
     Tags.of(this).add("Application", "CaptionDoor");
-    Tags.of(this).add("Environment", "remote-demo");
-    Tags.of(this).add("DataPurpose", "FictionalDemo");
+    Tags.of(this).add(
+      "Environment",
+      providerSmoke ? "remote-provider" : "remote-demo",
+    );
+    Tags.of(this).add(
+      "DataPurpose",
+      providerSmoke ? "ProviderSmokeShortLived" : "FictionalDemo",
+    );
 
     const table = (logical: string, stream?: dynamodb.StreamViewType) =>
       new dynamodb.Table(this, logical, {
@@ -139,6 +155,8 @@ export class CaptionDoorDatabaseStack extends Stack {
     new CfnOutput(this, "DatabaseAccount", { value: target.account });
     new CfnOutput(this, "DatabaseRegion", { value: target.region });
     new CfnOutput(this, "DatabaseMode", { value: "aws" });
-    new CfnOutput(this, "ApplicationEnvironment", { value: "remote-demo" });
+    new CfnOutput(this, "ApplicationEnvironment", {
+      value: providerSmoke ? "remote-provider" : "remote-demo",
+    });
   }
 }

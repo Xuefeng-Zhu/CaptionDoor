@@ -7,8 +7,14 @@ import { AppError } from "@captiondoor/domain";
 import { createVerifiedTranscribeClient } from "./aws-identity";
 import {
   armRootSmokeDeadline,
+  assertRootSmokePermit,
   type RootSmokePermit,
 } from "./root-smoke-permit";
+import {
+  armRemoteProviderDeadline,
+  assertRemoteProviderPermit,
+  type RemoteProviderPermit,
+} from "./remote-provider-permit";
 
 export type StreamingCaption = {
   mediaSessionId: string;
@@ -96,11 +102,13 @@ export class AwsPcmStream {
   private running = false;
   private stopped = false;
   private cancelRootDeadline: (() => void) | undefined;
+  private cancelRemoteDeadline: (() => void) | undefined;
   constructor(
     private mediaSessionId: string,
     private onCaption: (caption: StreamingCaption) => Promise<void>,
     private onFailure: (category: string) => void,
     private readonly rootPermit?: RootSmokePermit,
+    private readonly remotePermit?: RemoteProviderPermit,
   ) {
     if (rootPermit)
       this.cancelRootDeadline = armRootSmokeDeadline(rootPermit, () => {
@@ -108,6 +116,15 @@ export class AwsPcmStream {
         this.stop();
         this.onFailure("ROOT_SMOKE_DURATION_LIMIT");
       });
+    if (remotePermit)
+      this.cancelRemoteDeadline = armRemoteProviderDeadline(
+        remotePermit,
+        () => {
+          if (this.stopped) return;
+          this.stop();
+          this.onFailure("REMOTE_PROVIDER_SMOKE_DURATION_LIMIT");
+        },
+      );
   }
   private rootDeadlineReached() {
     if (!this.rootPermit || Date.now() < this.rootPermit.expiresAt)
@@ -118,8 +135,20 @@ export class AwsPcmStream {
     }
     return true;
   }
+  private remoteDeadlineReached() {
+    if (!this.remotePermit || Date.now() < this.remotePermit.expiresAt)
+      return false;
+    if (!this.stopped) {
+      this.stop();
+      this.onFailure("REMOTE_PROVIDER_SMOKE_DURATION_LIMIT");
+    }
+    return true;
+  }
+  private deadlineReached() {
+    return this.rootDeadlineReached() || this.remoteDeadlineReached();
+  }
   push(pcm: Uint8Array) {
-    if (this.rootDeadlineReached()) return false;
+    if (this.deadlineReached()) return false;
     return this.queue.push(pcm);
   }
   /** Complete account verification before the worker permits the browser to send PCM. */
@@ -136,6 +165,7 @@ export class AwsPcmStream {
           this.abort.signal,
           process.env,
           this.rootPermit,
+          this.remotePermit,
         );
         await this.aws.verify();
         if (this.stopped)
@@ -152,7 +182,13 @@ export class AwsPcmStream {
     this.running = true;
     try {
       await this.prepare();
-      if (this.stopped || this.rootDeadlineReached()) return;
+      if (this.stopped || this.deadlineReached()) return;
+      if (this.rootPermit)
+        assertRootSmokePermit(this.rootPermit, this.rootPermit);
+      if (this.remotePermit)
+        assertRemoteProviderPermit(this.remotePermit, this.remotePermit);
+      await this.aws!.verifyCredentials();
+      if (this.stopped || this.deadlineReached()) return;
       const chunks = this.queue;
       async function* audio(): AsyncGenerator<AudioStream> {
         for await (const chunk of chunks)
@@ -168,7 +204,7 @@ export class AwsPcmStream {
         { abortSignal: this.abort.signal },
       );
       for await (const event of output.TranscriptResultStream || []) {
-        if (this.stopped || this.rootDeadlineReached()) break;
+        if (this.stopped || this.deadlineReached()) break;
         for (const result of event.TranscriptEvent?.Transcript?.Results || []) {
           const caption = streamingCaptionFromResult(
             this.mediaSessionId,
@@ -194,6 +230,7 @@ export class AwsPcmStream {
     if (this.stopped) return;
     this.stopped = true;
     this.cancelRootDeadline?.();
+    this.cancelRemoteDeadline?.();
     this.queue.close();
     this.abort.abort();
     this.aws?.destroy();

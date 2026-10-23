@@ -1,0 +1,18 @@
+{
+  "current_stage": "submit-project",
+  "completed_stages": [],
+  "next_command": "submit-project",
+  "rules_acknowledged": false,
+  "documents": {
+    "submission": "devpost-submission.md"
+  },
+  "submission": {
+    "status": "needs-work",
+    "project_slug": "captiondoor",
+    "project_url": "https://devpost.com/software/captiondoor",
+    "pending": [
+      "public demo video",
+      "user eligibility and required personal answers"
+    ]
+  }
+}

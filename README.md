@@ -2,121 +2,114 @@
 
 **Understand your doorstep without relying on sound.**
 
-CaptionDoor helps a deaf or hard-of-hearing resident understand incoming doorstep speech. A visible doorbell alert leads to an explicit claim, an explicitly started caption session, handling the visit in person, and recorded closure. Visitor text and approved replies remain an optional separate fallback. Ring's current WHEP contract does not send reply audio to its doorbell speaker.
+CaptionDoor is a caption-first doorstep assistant for deaf and hard-of-hearing residents. A visible doorbell alert leads to a human claim, an explicitly started caption session, in-person handling and recorded closure. Visitor text and resident-approved replies provide an optional fallback.
 
-This checkout is at `/Users/frank/mygit/CaptionDoor`. The local demo uses real DynamoDB Local persistence and clearly labeled simulated Ring events/fixture captions. Database-only AWS configuration and its focused template are prepared and locally verified; **AWS cutover has not occurred**. See the [remote DynamoDB runbook](docs/remote-dynamodb-runbook.md) for the proposed resources, identity, cost and approval steps. Exact dated results and restart instructions are in [docs/test-results.md](docs/test-results.md); earlier passes do not verify subsequent changes or real providers.
+The local demo runs without Ring or AWS credentials. It uses **real DynamoDB Local persistence**, simulated doorbell events and clearly labeled fixture captions. Real provider support is implemented, but incoming Ring audio and AWS-generated captions have **not** been verified.
 
-## Run the credential-free local demo
+[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](docs/architecture.md) · [Verification log](docs/test-results.md) · [Contributing](CONTRIBUTING.md)
 
-Prerequisites: Node **24 LTS** (`.nvmrc` is 24.14.1), Corepack, and Docker/OrbStack running. pnpm **12.14.0** is pinned. Use `corepack pnpm` if no global `pnpm` command exists.
+## What you can try
+
+- Visible alerts and one resident responsible for each visit, with explicit handoff.
+- Captions that distinguish revisable partials from finalized segments.
+- An optional isolated visitor thread with editable replies and deliberate send.
+- Separate accepted, displayed and visitor-confirmed reply states.
+- Independent consent controls, scoped access, retention and explicit deletion.
+- A PWA with an honest offline state, keyboard controls and responsive layouts.
+
+Replies reach the visitor web page. CaptionDoor does not speak through a Ring speaker, unlock doors, send automatic replies, identify faces or record audio/video. Captions can be wrong; a finalized segment is not verified truth. Closing a visit or reaching a timeout does not prove that someone left.
+
+## Quick start
+
+Install Node **24 LTS** (the exact version is in [.nvmrc](.nvmrc)), Corepack and Docker or OrbStack. Start the container runtime before setup. The workspace pins pnpm **12.14.0**.
 
 ```sh
-cd /Users/frank/mygit/CaptionDoor
+git clone https://github.com/Xuefeng-Zhu/CaptionDoor.git
+cd CaptionDoor
 corepack pnpm install --frozen-lockfile
 corepack pnpm setup:local
 corepack pnpm dev
 ```
 
-Open **http://127.0.0.1:3410/onboarding**. Select the explicitly local Alex identity, review the three independent consents, and continue. Use a separate browser profile for Sam. For optional visitor text, use a private browser for **http://127.0.0.1:3410/door/front-demo**. Jordan belongs to the isolated second household.
+Open **[http://127.0.0.1:3410/onboarding](http://127.0.0.1:3410/onboarding)**, choose the local **Alex** identity and review the separate consent controls. In another tab, open **[/demo](http://127.0.0.1:3410/demo)** and select **A visitor rings**. Claim the visit with **I'll handle this**, then choose **Start Demo transcript**. Handle the fictional visit and explicitly record an outcome with **Close visit**.
 
-The printable local QR uses the configured loopback origin and works on this Mac. A phone cannot reach the Mac through its own `127.0.0.1`; use an explicitly authorized reachable HTTPS origin before printing a sign for another device. No public tunnel or domain was created.
+Use a separate browser profile for **Sam**, the other resident. **Jordan** belongs to a second isolated household. For optional visitor text, open **[/door/front-demo](http://127.0.0.1:3410/door/front-demo)** in a private browser window. The resident must explicitly associate that thread; a QR scan or nearby timestamp establishes neither identity nor presence.
 
-`setup:local` starts only Compose project `captiondoor_local`, creates the three DynamoDB tables/indexes, and seeds missing local records without replacing existing records. It creates an ignored `.env` and a private local fixture signing key if absent, preserving existing values. Local setup selects `CAPTIONDOOR_DB_MODE=local`, `CAPTIONDOOR_ENV=local` and `DYNAMODB_ENDPOINT=http://127.0.0.1:8410`; `.env.example` documents the remaining local values. It never requests AWS credentials. After configuration changes, restart web/worker processes. Missing or incompatible database modes fail visibly; there is no implicit AWS/Local fallback.
+Setup starts only Compose project `captiondoor_local`, creates the three tables/indexes and seeds missing fictional records. Existing records are preserved. It also creates an ignored `.env` and a local fixture signing key when absent, without requesting cloud credentials. Keep `.env` private and restart web/worker after configuration changes.
 
-Ports are isolated: **3410 web**, **3411 worker WebSocket/health**, **8410 DynamoDB Local**, optional **3443 HTTPS**. All host bindings are loopback. No SayGo/Sway process or shared database is stopped or reused.
+| Service                   | Local address                                             |
+| ------------------------- | --------------------------------------------------------- |
+| Web and HTTP API          | `http://127.0.0.1:3410`                                   |
+| Worker health / WebSocket | `http://127.0.0.1:3411/health` / `ws://127.0.0.1:3411/ws` |
+| DynamoDB Local            | `http://127.0.0.1:8410`                                   |
+| Optional HTTPS proxy      | `https://localhost:3443`                                  |
 
-## Docker application processes
+All host bindings are loopback. A phone's `127.0.0.1` points to the phone; testing the QR on another device needs a separately configured reachable HTTPS origin. See [local development](docs/local-development.md) for application containers, HTTPS, shutdown and troubleshooting.
 
-After setup, stop only this project's host `pnpm dev` process before starting the application containers on the same ports:
-
-```sh
-corepack pnpm setup:local
-docker compose -p captiondoor_local --profile app up --build -d
-curl --fail http://127.0.0.1:3410/api/health
-curl --fail http://127.0.0.1:3411/health
-```
-
-The local application targets use explicit development/demo modes. The separate production targets use actual OIDC/Ring/AWS configuration and reject demo/fixture combinations. `infra/compose.aws.yaml` is a deployment configuration for later review, not an executed deployment. The optional HTTPS profile uses Caddy's private CA and **does not install system trust**; see `docs/architecture.md`. No certificate/security setting is changed automatically.
-
-To stop the application containers, use `docker compose -p captiondoor_local --profile app stop web worker`. To free the sequential project slot, also stop CaptionDoor's database with `docker compose -p captiondoor_local stop dynamodb`; if using the optional HTTPS profile, stop its CaptionDoor proxy too. Stopping preserves volumes. Do not run a global Docker prune or stop other projects.
-
-## AWS database development on the Mac
-
-AWS storage is separate from provider/auth modes. The proposed `remote-demo` still runs the web/worker on loopback with fictional demo identities, simulated Ring and fixture transcription. Production continues to require its own OIDC/live/AWS configuration and rejects demo combinations.
-
-The review template is [config/aws-demo.env.example](config/aws-demo.env.example). After separate resource/access approval, AWS mode requires `CAPTIONDOOR_DB_MODE=aws`, `CAPTIONDOOR_ENV=remote-demo`, an approved `AWS_ACCOUNT_ID`/`AWS_REGION`, all three explicit `CaptionDoorDev…` table names and an approved non-root temporary identity through the normal SDK chain. It skips Local `.env` loading and rejects endpoint overrides, local dummy credentials, root and account mismatches. Do not source the Local `.env` or configure the existing root profile as app identity.
-
-The focused plan creates only **three tables, two `KEYS_ONLY` GSIs, TTL and a Runtime `KEYS_ONLY` stream**, with a 5,000ms Mac worker poller. No full application stack, IAM grant, seed or private-content migration has been executed. Account `256604024085` was observed read-only; Region `us-east-1` is proposed and the exact trusted non-root principal is unresolved. The estimate is **$1.2148/month** for the runbook workload, before tax/transfer and without assuming free credits. The proposed $5/month review allowance is unapproved and is not a hard cap. Follow the [runbook](docs/remote-dynamodb-runbook.md) before activating any remote access or write.
-
-## Try the complete journey
-
-1. `/demo` → **A visitor rings**. This signs LOCAL fixture bytes and uses the same HMAC normalization and DynamoDB transaction path. It is not the official Ring Playground.
-2. On the home screen choose **I'll handle this.** Claiming sends nothing.
-3. In the visit choose **Start Demo transcript** after consent. Its revisable fixture ends with **Do not leave it.** Finalized means the segment ended, not that recognition is verified.
-4. Read the captions and handle the visit in person. This local scenario does not actually capture a visitor or perform an in-person action. Media can expire while responsibility and permitted caption history remain.
-5. Choose a closure outcome and **Close visit**. A timeout never establishes departure.
-
-Optional visitor text: open **Visitor text (optional)**, send a fictional request from the private visitor browser and explicitly **Associate thread**. Edit a preset, then choose **Send to visitor page**. ACCEPTED, DISPLAYED and explicit **Got it** confirmation are separate. A QR scan or nearby timestamp establishes neither identity nor presence. No visitor page is needed for the primary caption journey.
-
-The other local cards exercise unavailable media and duplicate semantic deliveries. Real tests cover concurrent claims, stale handler/audio fences, expiry, worker restart, guest disconnect/reconnect and tenant denials. The under-three-minute walkthrough is in [docs/demo-script.md](docs/demo-script.md). The current114-second caption-first Local rehearsal is saved at `output/demo-caption-first-20261023/CaptionDoor-caption-first-demo.mp4`; it labels synthetic sources and does not claim Ring/AWS provider proof.
-
-A visitor without a phone may supply incoming audio for available captions, but cannot receive these web replies. The app never speaks through a Ring speaker, unlocks a door, monitors continuously, identifies faces/emotions, diagnoses emergencies or sends automatic/LLM replies. The app does not record audio/video or request a resident/visitor microphone.
-
-## Commands and verification
+## Verification
 
 ```sh
+# TypeScript and unit tests; no provider credentials needed
 corepack pnpm check
+
+# Requires DynamoDB Local on 8410
 corepack pnpm test:integration
+
+# Also requires running web/worker and Chromium
 corepack pnpm exec playwright install chromium
 corepack pnpm test:e2e
 corepack pnpm judge:replay
-# Full application architecture template; not a database-only deployment:
-corepack pnpm infra:synth
+
+# Production compilation and packaging checks; no provider calls
+corepack pnpm build
 ```
 
-The credential-free `judge:replay` command runs one synthetic journey through actual local services, preserves nonzero failures and writes a new timestamped evidence directory per attempt. It refuses production/provider modes and existing active demo visits; deliberately close the current local visit first. See [docs/judging-replay.md](docs/judging-replay.md). The current replay passed in14.3s; evidence is in `output/judge-replay/2026-10-23T12-07-23-610Z-88eb48` (LOCAL/FIXTURE only). The earlier BLOCKED run and active-visit refusal remain in the verification log. It establishes LOCAL/FIXTURE behavior only.
+The replay runs a synthetic journey through actual local APIs, sockets and DynamoDB. It refuses provider/production modes and existing active demo visits, preserves failed attempts and writes a new evidence directory for each run. See [the replay guide](docs/judging-replay.md).
 
-Integration tests require the real local database on port 8410; browser tests also require web 3410 and worker 3411. Their guards refuse AWS/nonlocal database modes, even if the app origin is loopback. They create isolated fixtures/threads. `test:recovery` requires the main CaptionDoor worker to be stopped first; it starts/stops only its own child worker and refuses an occupied port. It verifies a durable job across a real process restart. These suites are not a remote smoke test.
+The [verification log](docs/test-results.md) records dated results, failures and skips. Unit tests may mock SDK/provider transport; integration tests use actual DynamoDB Local. Builds and synthesized templates do not establish cloud or device behavior. WCAG 2.2 AA is a design target; physical Safari/iOS and assistive-technology validation remain separate work.
 
-`corepack pnpm build` compiles production Next artifacts with explicit OIDC/live/AWS modes and synthetic account/Region/table metadata, making no SDK/provider calls. That metadata is for compilation only; runtime still requires actual approved production configuration. Production does not permit the local demo environment. Cloud SDK/provider calls remain opt-in; no successful cloud/device behavior is inferred from fixture tests or synth.
+## Current integration status
 
-The separate `infra:database:synth` prepares only the three-table development template with explicit account/Region metadata and lookups disabled. `db:verify --help` describes the read-only AWS readiness check; running `db:verify` contacts STS/DynamoDB and belongs to the approved access stage. See the [runbook](docs/remote-dynamodb-runbook.md) for the offline synth command and gated sequence.
+As of **2026-10-23**, recorded evidence distinguishes these layers:
 
-See [docs/test-results.md](docs/test-results.md) for exact observed commands, pass/fail/skip history, screenshots and single-run latency observations. WCAG 2.2 AA is a design target, not certification. Chromium checks include 320px, keyboard/focus, 48px controls, reduced motion, effective 320px reflow at 200% zoom and axe. Physical Safari/iOS and real provider/device paths require separate validation.
+| Layer                          | Recorded outcome                                                                                                                                                                                                       |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local product journey          | Passed local integration, Chromium and replay checks on the dated revisions in the verification log.                                                                                                                   |
+| Dedicated remote DynamoDB test | Three provider-test tables created and fictional seed setup completed; exact own-content and encrypted cleanup-copy absence verified after the attempt. Retained tables and budget metadata remain.                    |
+| Official Ring Playground       | Device discovery reached during one authorized attempt. No incoming audio/video tracks were observed by the harness; the report was **SKIP**, coordinator **BLOCKED**. The exact media failure cause was not recorded. |
+| AWS Transcribe                 | The attempt never started transcription; no PCM or AWS final captions were observed.                                                                                                                                   |
+| Production and devices         | Live webhooks, Cognito/KMS, cloud dispatch, provider/device push and physical Safari/iOS remain unverified.                                                                                                            |
 
-## Boundaries and storage
+The remote test used a narrowly authorized exception and an operator-reviewed budget baseline. Its single authorized attempt is exhausted; zero paid-capture counters do not authorize a retry. The former Local paid-test scope was retired. See [the remote session checkpoint](docs/remote-provider-session.md) for the exact evidence and cleanup limits. Ordinary local demo setup remains credential-free.
 
-The pnpm workspace contains `apps/web` (Next App Router resident PWA, guest page and HTTP APIs), `apps/worker` (single long-running authenticated WebSocket/audio/job worker), browser-safe `packages/domain`/`contracts`, DynamoDB `packages/db`, provider `packages/integrations`, `infra/cdk`, fixtures and tests.
+The separate [remote-demo database plan](docs/remote-dynamodb-runbook.md) uses different tables and remains a proposal. It must not be confused with the executed provider-test stack. Public source availability does not mean the application is publicly deployed or submitted to a hackathon.
 
-DynamoDB is the **only persistent application database**. Local names are `CaptionDoorConfig`, `CaptionDoorVisits`, `CaptionDoorRuntime`; the isolated AWS development proposal uses `CaptionDoorDevConfig`, `CaptionDoorDevVisits`, `CaptionDoorDevRuntime`. There is no SQL/Prisma/Postgres/SQLite/Supabase/Redis or in-memory persistence substitute. State, idempotency, audit and outbox writes are atomic. Base-table strong reads and conditional versions authorize decisions; GSIs are discovery mechanisms. Each final caption/message is its own item. Application expiry is enforced before delayed TTL cleanup; explicit durable deletion removes content copies.
+## Architecture and repository
 
-Local jobs use a bounded due-index poller and the same handlers. The proposed database-only AWS development mode keeps that single Mac poller, defaulting to 5,000ms, with no deployed stream consumer. This is a transport substitute, **not Streams/SQS validation**. The separate full AWS architecture uses KEYS_ONLY Streams → filtered Lambda → SQS job keys only → Node worker, with due-index recovery, conditional leases/retries and DLQ. One worker is the supported MVP; replicas need shared fan-out because SQS competing consumers do not broadcast.
+```mermaid
+flowchart LR
+  Resident[Resident PWA] --> Web[Next.js HTTP API]
+  Visitor[Optional visitor text page] --> Web
+  Resident <-->|Authenticated WebSocket| Worker[Single Node worker]
+  Web --> DB[(DynamoDB: Config / Visits / Runtime)]
+  Worker --> DB
+  Worker -->|Explicit capture, incoming audio only| Transcribe[AWS Transcribe adapter]
+```
 
-The service worker caches only a public offline page/icon. It does not cache private API responses, transcripts, media, tokens or session pages. Offline visibly means no live alerts.
+DynamoDB is the **only persistent application database**. Authorization uses strong base-table reads and conditional transactions; GSIs discover work and visits. Runtime request/job paths do not scan tables. Local mode uses a due-index poller; the full cloud template additionally describes Streams → Lambda → SQS/DLQ dispatch, which is not deployed or validated by local tests.
 
-## Real integration prerequisites
+| Path                                                                         | Responsibility                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [apps/web](apps/web)                                                         | Next.js resident PWA, visitor page and HTTP APIs       |
+| [apps/worker](apps/worker)                                                   | Long-running WebSocket, capture and durable-job worker |
+| [packages/domain](packages/domain), [packages/contracts](packages/contracts) | Browser-safe domain types, rules and wire contracts    |
+| [packages/db](packages/db)                                                   | DynamoDB access, transactions, leases and deletion     |
+| [packages/integrations](packages/integrations)                               | Ring, Transcribe, encryption and push adapters         |
+| [infra](infra)                                                               | Isolated Compose configuration and CDK templates       |
+| [scripts](scripts), [tests](tests), [fixtures](fixtures)                     | Setup, replay, guarded provider tools and verification |
 
-`.env.example` documents Local defaults and optional provider fields; it is not an approved AWS runtime configuration. Use only approved protected runtime configuration for real credentials, with temporary AWS identity through the normal SDK chain. Never use `NEXT_PUBLIC_`, localStorage, screenshots, logs or committed files for secrets. The local fixture HMAC key is separate from a real Ring partner HMAC key.
+Start with [architecture](docs/architecture.md), [data access patterns](docs/data-model.md), [HTTP contracts](docs/http-contract.md) and [security and privacy](docs/security-and-privacy.md). All guides are indexed in [docs/README.md](docs/README.md).
 
-- **Cognito**: configure issuer/client/secret and HTTPS callback. OIDC is separate from Ring linking. A trusted operator must initially provision the owner identity/household. Owner-created invitation codes are one-use/expiring, bound to a verified Cognito subject at acceptance, and capped at two active members; no email is sent automatically. The local seed already contains two residents.
-- **Ring Playground**: explicit `RING_MODE=playground` and an actual authorized short-lived token. Hardware or simulator use must include observed substantial Ring technology; organizer guidance allows a self-built simulator with that real integration evidence. LOCAL-only fixtures and intercepted tests do not supply it. There is no fallback to LOCAL. See the submission checklist for source links and mixed-provenance limits.
-- **Ring live**: approved invitation-only partner access, OAuth credentials, registered HTTPS callback/webhook and signing key, selected authorized device. Tokens are encrypted before persistence; link completion is explicit. KMS is required in production; a separately generated AES-GCM key is available only for deliberate development linking.
-- **Transcribe**: explicit `TRANSCRIBE_MODE=aws`, approved `TRANSCRIBE_AWS_ACCOUNT_ID`/`TRANSCRIBE_AWS_REGION` and temporary SDK credentials/IAM (non-root by default; a separately authorized fixed Local-only root test uses a durable 90-second budget and server deadline, documented in the provider runbook), separate transcription consent and a selected incoming remote audio track. AudioWorklet resamples to actual mono 16kHz signed PCM16LE, 100ms chunks. Missing audio/expiry/provider failure leaves text available.
-- **Web Push**: VAPID configuration and explicit browser opt-in/test. Provider acceptance does not mean the user saw or acknowledged anything. iOS/iPadOS requires an installed Home Screen web app and a user gesture.
+## License
 
-No cloud/device prerequisites are fabricated. See [docs/integration-contracts.md](docs/integration-contracts.md), [docs/compatibility-matrix.md](docs/compatibility-matrix.md), [docs/security-and-privacy.md](docs/security-and-privacy.md), and [docs/assumptions-and-blockers.md](docs/assumptions-and-blockers.md). The prepared `corepack pnpm smoke:provider` command defaults to zero-network preflight; actual provider execution is unapproved/unobserved. Exact approval, cost, isolated setup and evidence boundaries are in [docs/playground-audio-proof.md](docs/playground-audio-proof.md). General provider smoke prerequisites are in [docs/ring-smoke.md](docs/ring-smoke.md), and factual developer feedback is in [docs/tool-feedback.md](docs/tool-feedback.md).
-
-## Troubleshooting and reset
-
-- Docker connection error: start the installed Docker/OrbStack application, then rerun setup. The application never changes system trust or asks you to disable Ring encryption.
-- Port conflict: inspect the exact port and stop only this project's own process/container. Do not kill SayGo/Sway or reuse their database.
-- Missing database mode: rerun `setup:local` for the preserved Local setup, or deliberately select an approved AWS target using the runbook. Do not add dummy credentials or endpoint overrides to AWS mode.
-- Missing local signing key: rerun setup and restart web/worker. No key is printed.
-- 503 provider configuration: read the visible error and configure the named provider explicitly; local text/demo remains independent.
-- 409 command conflict: refetch the current visit; exactly one resident can win a claim. A pending handoff keeps the original resident responsible.
-- Captions stop: check consent, incoming track, active lease, media expiry and connection. Reconnect reloads strong state plus paginated history; it does not replay delayed audio as live.
-- Guest refresh retains only that browser's thread. A different browser gets a different thread. Expired/revoked cookies cannot restore content merely because TTL has not run.
-
-`corepack pnpm demo:reset` is destructive **only to CaptionDoor's exact local tables**. It refuses AWS/nonlocal modes, unexpected endpoints/ports/table names and production. Use it only to reset this controlled demo; normal setup preserves existing data. It does not delete shared services or Docker volumes from other projects.
-
-New code is MIT; dependency licenses/notices remain in installed packages. See LICENSE and THIRD_PARTY_NOTICES.md. The user subsequently authorized the separate [private GitHub source repository](https://github.com/Xuefeng-Zhu/CaptionDoor). Public visibility, billable deployment and hackathon submission remain unauthorized. Repository verification is recorded in docs/test-results.md.
+CaptionDoor's new code is licensed under [MIT](LICENSE). Dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ring and AWS integrations require their own authorized access and configuration; no credentials ship with this repository.

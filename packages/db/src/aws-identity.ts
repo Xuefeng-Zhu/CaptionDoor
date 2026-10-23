@@ -1,12 +1,15 @@
 import type { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { AppError } from "@captiondoor/domain";
 export type AwsIdentity = { Account?: string; Arn?: string };
+export type AwsIdentityGuardOptions = { allowRoot?: boolean };
 
 /** One account check per process/client; restart after any runtime identity change. */
 export function createAwsIdentityGuard(
   accountId: string,
   load: () => Promise<AwsIdentity>,
+  options: AwsIdentityGuardOptions = {},
 ): () => Promise<void> {
+  const allowRoot = options.allowRoot === true;
   let pending: Promise<void> | undefined;
   return () => {
     if (!pending)
@@ -22,6 +25,8 @@ export function createAwsIdentityGuard(
             arn[2] !== accountId ||
             !(
               (arn[1] === "iam" && /^user\/.+/.test(arn[3])) ||
+              (allowRoot &&
+                identity.Arn === `arn:aws:iam::${accountId}:root`) ||
               (arn[1] === "sts" &&
                 /^(assumed-role|federated-user)\/.+/.test(arn[3]))
             )
@@ -34,7 +39,9 @@ export function createAwsIdentityGuard(
           throw new AppError(
             "AWS_DATABASE_IDENTITY_UNVERIFIED",
             503,
-            "AWS database access requires the approved account and a verified non-root application identity.",
+            allowRoot
+              ? "AWS database access requires the approved account and an explicitly authorized identity."
+              : "AWS database access requires the approved account and a verified non-root application identity.",
           );
         });
     return pending;
@@ -45,8 +52,9 @@ export function installAwsIdentityGuard(
   client: DynamoDBClient,
   accountId: string,
   load: () => Promise<AwsIdentity>,
+  options: AwsIdentityGuardOptions = {},
 ): void {
-  const verify = createAwsIdentityGuard(accountId, load);
+  const verify = createAwsIdentityGuard(accountId, load, options);
   client.middlewareStack.add(
     (next) => async (args) => {
       await verify();

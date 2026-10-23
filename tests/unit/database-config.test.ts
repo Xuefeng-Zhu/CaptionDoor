@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { remoteProviderSmokeConfig } from "@captiondoor/domain";
 import {
   databaseClientOptions,
   resolveDatabaseConfig,
@@ -36,6 +37,34 @@ const production = (override: Env = {}): Env =>
     CAPTIONDOOR_RUNTIME_TABLE: "CaptionDoorRuntime",
     ...override,
   });
+const remoteProvider = (override: Env = {}): Env => {
+  const config = remoteProviderSmokeConfig;
+  return remote({
+    CAPTIONDOOR_ENV: "remote-provider",
+    AUTH_MODE: "demo",
+    RING_MODE: "playground",
+    TRANSCRIBE_MODE: "aws",
+    CAPTIONDOOR_PROVIDER_SMOKE: "1",
+    CAPTIONDOOR_REMOTE_PROVIDER_SMOKE: "1",
+    CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL: config.scope,
+    CAPTIONDOOR_REMOTE_PROVIDER_WRITES_APPROVAL: config.scope,
+    CAPTIONDOOR_REMOTE_PROVIDER_CLOUD_COPY_APPROVAL: config.scope,
+    CAPTIONDOOR_SMOKE_APPROVAL: "captions",
+    CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_SECONDS: "30",
+    CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_MICROUSD: "12000",
+    CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_SHA256: "a".repeat(64),
+    CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_APPROVAL: config.scope,
+    AWS_ACCOUNT_ID: config.accountId,
+    AWS_REGION: config.region,
+    TRANSCRIBE_AWS_ACCOUNT_ID: config.accountId,
+    TRANSCRIBE_AWS_REGION: config.region,
+    CAPTIONDOOR_AWS_TABLE_PREFIX: config.tablePrefix,
+    CAPTIONDOOR_CONFIG_TABLE: `${config.tablePrefix}Config`,
+    CAPTIONDOOR_VISITS_TABLE: `${config.tablePrefix}Visits`,
+    CAPTIONDOOR_RUNTIME_TABLE: `${config.tablePrefix}Runtime`,
+    ...override,
+  });
+};
 
 describe("explicit DynamoDB configuration without a storage fallback", () => {
   it.each([
@@ -258,5 +287,89 @@ describe("remote demo and production boundaries", () => {
     expect(resolveDatabaseConfig(remote()).pollIntervalMs).toBeGreaterThan(
       resolveDatabaseConfig(local()).pollIntervalMs,
     );
+  });
+});
+
+describe("isolated remote provider database configuration", () => {
+  it("validates only the exact provider namespace and leaves AWS credentials to the verified session", () => {
+    const config = resolveDatabaseConfig(remoteProvider());
+    expect(config).toEqual({
+      mode: "aws",
+      environment: "remote-provider",
+      region: remoteProviderSmokeConfig.region,
+      accountId: remoteProviderSmokeConfig.accountId,
+      tables: {
+        config: `${remoteProviderSmokeConfig.tablePrefix}Config`,
+        visits: `${remoteProviderSmokeConfig.tablePrefix}Visits`,
+        runtime: `${remoteProviderSmokeConfig.tablePrefix}Runtime`,
+      },
+      pollIntervalMs: 5000,
+    });
+    expect(databaseClientOptions(config)).toEqual({
+      region: remoteProviderSmokeConfig.region,
+      maxAttempts: 3,
+      ignoreConfiguredEndpointUrls: true,
+    });
+  });
+
+  it.each([
+    { CAPTIONDOOR_REMOTE_PROVIDER_SMOKE: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_WRITES_APPROVAL: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_CLOUD_COPY_APPROVAL: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_APPROVAL: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_SECONDS: undefined },
+    { CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_MICROUSD: "0" },
+    { CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_SHA256: undefined },
+    { CAPTIONDOOR_ROOT_SMOKE: "0" },
+    { CAPTIONDOOR_ROOT_SMOKE_APPROVAL: "" },
+    { CAPTIONDOOR_ROOT_SMOKE_OTHER: "1" },
+    { CAPTIONDOOR_ENV: "remote-demo" },
+    { CAPTIONDOOR_ENV: "local" },
+    { CAPTIONDOOR_DB_MODE: "local" },
+    { CAPTIONDOOR_AWS_TABLE_PREFIX: "CaptionDoorDev" },
+    { CAPTIONDOOR_CONFIG_TABLE: "CaptionDoorConfig" },
+    { CAPTIONDOOR_RUNTIME_TABLE: "CaptionDoorDevProviderSmoke20261024Runtime" },
+    { APP_ORIGIN: "https://public.fixture.invalid" },
+    { AWS_ACCOUNT_ID: "000000000000" },
+    { AWS_REGION: "us-west-2" },
+    { TRANSCRIBE_AWS_REGION: "us-west-2" },
+  ])(
+    "fails closed before constructing a database client for %j",
+    (override) => {
+      expect(() => resolveDatabaseConfig(remoteProvider(override))).toThrow();
+    },
+  );
+
+  it.each([
+    "DYNAMODB_ENDPOINT",
+    "AWS_ENDPOINT_URL",
+    "AWS_ENDPOINT_URL_DYNAMODB",
+    "AWS_ENDPOINT_URL_STS",
+    "AWS_ENDPOINT_URL_TRANSCRIBE_STREAMING",
+    "AWS_ENDPOINT_URL_UNKNOWN",
+    "TRANSCRIBE_ENDPOINT",
+  ])("rejects defined provider endpoint override %s, even empty", (key) => {
+    for (const value of ["", "http://127.0.0.1:8410"])
+      expect(() =>
+        resolveDatabaseConfig(remoteProvider({ [key]: value })),
+      ).toThrow();
+  });
+
+  it("does not grant the dedicated provider namespace to fixture-only remote demo", () => {
+    const provider = remoteProvider();
+    expect(() =>
+      resolveDatabaseConfig(
+        remote({
+          CAPTIONDOOR_AWS_TABLE_PREFIX: provider.CAPTIONDOOR_AWS_TABLE_PREFIX,
+          CAPTIONDOOR_CONFIG_TABLE: provider.CAPTIONDOOR_CONFIG_TABLE,
+          CAPTIONDOOR_VISITS_TABLE: provider.CAPTIONDOOR_VISITS_TABLE,
+          CAPTIONDOOR_RUNTIME_TABLE: provider.CAPTIONDOOR_RUNTIME_TABLE,
+        }),
+      ),
+    ).toThrow(/namespace/);
+    expect(() =>
+      resolveDatabaseConfig(local({ CAPTIONDOOR_REMOTE_PROVIDER_SMOKE: "" })),
+    ).toThrow();
   });
 });

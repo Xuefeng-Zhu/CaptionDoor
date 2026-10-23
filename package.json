@@ -21,7 +21,11 @@
     "judge:replay": "tsx scripts/judge-replay.ts",
     "infra:database:synth": "cdk synth --app \"tsx infra/cdk/database-app.ts\" --output output/cdk-database --lookups false",
     "db:verify": "tsx scripts/verify-aws-database.ts",
-    "smoke:provider": "tsx scripts/provider-smoke.ts"
+    "smoke:provider": "tsx scripts/provider-smoke.ts",
+    "provider:session": "tsx scripts/provider-session.ts",
+    "provider:session:remote": "tsx scripts/provider-session-remote.ts",
+    "provider:remote:plan": "tsx scripts/prepare-remote-provider.ts",
+    "infra:provider-database:synth": "cdk synth --app \"tsx infra/cdk/provider-database-app.ts\" --output output/cdk-provider-database --lookups false"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1155.0",

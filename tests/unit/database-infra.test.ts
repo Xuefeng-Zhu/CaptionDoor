@@ -178,4 +178,54 @@ describe("database-only remote demo infrastructure", () => {
       validateDatabaseDeploymentTarget(target.account, target.region, prefix),
     ).toThrow("prefix");
   });
+  it("allows only the exact provider namespace in its fixed account and Region", () => {
+    const prefix = "CaptionDoorDevProviderSmoke20261023";
+    expect(
+      validateDatabaseDeploymentTarget("256604024085", "us-east-1", prefix),
+    ).toEqual({
+      account: "256604024085",
+      region: "us-east-1",
+      tablePrefix: prefix,
+    });
+    expect(() =>
+      validateDatabaseDeploymentTarget("000000000000", "us-east-1", prefix),
+    ).toThrow(/exact approved/);
+    expect(() =>
+      validateDatabaseDeploymentTarget("256604024085", "us-west-2", prefix),
+    ).toThrow(/exact approved/);
+    for (const otherPrefix of [
+      "CaptionDoorDevProviderSmoke20261022",
+      "CaptionDoorDevProviderSmoke20261024",
+      `${prefix}-other`,
+    ])
+      expect(() =>
+        validateDatabaseDeploymentTarget(
+          "256604024085",
+          "us-east-1",
+          otherPrefix,
+        ),
+      ).toThrow(/prefix/);
+  });
+  it("labels the dedicated provider template accurately without creating identities or compute", () => {
+    const app = new App({ analyticsReporting: false });
+    const template = Template.fromStack(
+      new CaptionDoorDatabaseStack(app, "ProviderContract", {
+        env: { account: "256604024085", region: "us-east-1" },
+        tablePrefix: "CaptionDoorDevProviderSmoke20261023",
+      }),
+    );
+    template.hasOutput("ApplicationEnvironment", { Value: "remote-provider" });
+    for (const resource of Object.values(
+      template.toJSON().Resources,
+    ) as any[]) {
+      expect(resource.Type).toBe("AWS::DynamoDB::Table");
+      expect(resource.Properties.Tags).toEqual(
+        expect.arrayContaining([
+          { Key: "Environment", Value: "remote-provider" },
+          { Key: "DataPurpose", Value: "ProviderSmokeShortLived" },
+        ]),
+      );
+    }
+    expect(JSON.stringify(template.toJSON())).not.toContain("FictionalDemo");
+  });
 });

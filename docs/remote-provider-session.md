@@ -1,0 +1,86 @@
+# Remote provider session — execution checkpoint
+
+Updated 2026-10-23. This is an operator-specific execution record, not a fresh-clone setup guide. Referenced `output/` receipts are ignored and are not published with the source. The approved remote DynamoDB stack and fictional seed setup executed successfully. The user then delegated the remaining work: “just do it for me. The token is temporary”. A supported browser-to-owned-PTY handoff is now working without native Terminal automation. Actual remote run `92ab9ae7-b66f-4e7b-bac4-d25b91d23cf2` completed with report **SKIP: INCOMING_AUDIO_NOT_OBSERVED_WITHIN_BOUND** and coordinator **BLOCKED / exit2**. No audio/video tracks, PCM or AWS finals were observed. Exact own-content and encrypted-cleanup-copy absence in AWS was verified, owned processes stopped and secrets were discarded. Ring provider DELETE/expiry were not observed. No second attempt is authorized or has started.
+
+## Approval and observed execution
+
+The user approved the exact scope recorded in `output/provider-remote-preparation-20261023/approval-receipt.json`: existing `tally` principal `arn:aws:iam::256604024085:root` in `us-east-1`; three dedicated DynamoDB tables; a **$1 database review allowance** for this bounded test, not an AWS hard cap; 17 marked fictional seed records and bounded test state; a temporary AES key and encrypted access-token-only WHEP DELETE copy in Runtime with application validity no more than 60 seconds; one provider attempt no more than 30 seconds; explicit own-content/token-copy cleanup; and the existing cumulative 90-second/$10 transcription limits without resetting previous usage. No new IAM role, trust or grant was created. Ordinary database, remote-demo and production root rejection remain enabled outside the exact remote exception.
+
+The user also explicitly confirmed zero prior attempts/reservations and approved Local scope retirement. The actual `approved-baseline.json` records `OPERATOR_REVIEWED_CARRY_FORWARD`, zero seconds/microUSD/attempts, the original `captiondoor-root-verification-20261022` scope and `CaptionDoorProviderSmoke20261022` prefix, and `localScopeRetired: true`. This is operator-confirmed carry-forward evidence, **not a DynamoDB Local strong-read observation**. The fixed `output/provider-smoke/local-scope-retired.json` marker has now been exclusively created and verified with mode0600, the exact remote scope and approved-baseline SHA-256 `3f87674152900166d42d6b00ceab50354726a27aa3148e2fd3a4e704f6bdda01`. The old Local paid scope is physically retired. The launcher verifies that marker and binds the remote ledger to the same baseline; a new run ID or table cannot reset the carried-forward counters.
+
+| Actual observation                                            | Result and evidence                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CloudFormation stack `CaptionDoorProviderDatabaseDev20261023` | **CREATE_COMPLETE**, `2026-10-23T18:07:37.829109Z`; `output/provider-remote-preparation-20261023/stack-status.json`                                                                                                                                                        |
+| Remote setup                                                  | **PASS**, `2026-10-23T18:09:14.283Z`; three tables checked,17seed rows created, zero retained; `output/provider-remote-preparation-20261023/storage-setup-result.json`                                                                                                     |
+| Official Ring Playground                                      | One temporary token generated under the existing approval. The existing token was reused for this handoff; no replacement was generated. Transfer stayed in browser/bridge process memory, with no plaintext token in chat, files, command arguments, logs or screenshots. |
+| Native Terminal automation                                    | Refused by the computer-use safety layer and remains unused. The alternative uses supported browser UI/clipboard APIs and an exec-managed child PTY.                                                                                                                       |
+| Handoff probe                                                 | Actual Chrome→password form→Node `hiddenTerminalInput` fictional probe **PASS**: value received without echo. This proves the intake layer only.                                                                                                                           |
+| Actual provider run                                           | Report **SKIP: INCOMING_AUDIO_NOT_OBSERVED_WITHIN_BOUND**; coordinator **BLOCKED / exit2**. Sole authorized device selected as1; START submitted once.                                                                                                                     |
+| Provider media/content cleanup                                | Exact AWS own-visit/runtime partitions and encrypted cleanup copy absent; **cleanup PASS**. Provider DELETE and expiry remain **UNOBSERVED**.                                                                                                                              |
+
+The direct CloudFormation template is `output/cdk-provider-database/CaptionDoorProviderDatabaseDev20261023.direct.template.json`, SHA-256 `0ce85dbaa5e7509277be1c0cfe4a4ce7cb817981971e8531888fab073a29ad7d`. It differs from the CDK review template only by removal of `Parameters.BootstrapVersion` and `Rules.CheckBootstrapVersion`; Resources and Outputs are deep-identical. Creation used the direct template, with no CDK deploy, S3 asset publication, SSM/bootstrap dependency, IAM resource or bootstrap resource. The original CDK assembly still contains its generated deployment metadata and must not be mistaken for the direct deployment path.
+
+## Exact remote target
+
+Account `256604024085`, Region `us-east-1`, environment `remote-provider`, scope `captiondoor-remote-provider-verification-20261023` and prefix `CaptionDoorDevProviderSmoke20261023` remain fixed.
+
+| Created table                                | Index and stream                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------ |
+| `CaptionDoorDevProviderSmoke20261023Config`  | String PK/SK; no index or stream                                         |
+| `CaptionDoorDevProviderSmoke20261023Visits`  | String PK/SK; `household-time` on `gsi1pk`/`gsi1sk`, KEYS_ONLY           |
+| `CaptionDoorDevProviderSmoke20261023Runtime` | String PK/SK; `due-work` on `duePk`/`dueSk`, KEYS_ONLY; KEYS_ONLY stream |
+
+The tables use Standard on-demand billing, TTL `expiresAt`, AWS-owned encryption, deletion protection, Retain/UpdateReplace Retain and PITR off. Each table/index has 50 read/50 write request-unit targets. These targets and the $1 review allowance are not hard cost caps. Retained storage can continue charging while processes are stopped. The tables and budget metadata are retained after this test; there is no automatic table deletion.
+
+The Mac worker uses its due-index poller at 5-second intervals. There is no deployed worker, stream consumer, Lambda, SQS queue, public host, Cognito or additional KMS resource. This remote test does not require OrbStack.
+
+## Supported browser-to-owned-PTY handoff
+
+`scripts/provider-session-browser-bridge.py` wraps the existing approved remote launcher in an exec-managed child PTY. It does not automate the prohibited native Terminal app, use osascript, or read browser cookies, profiles or Keychain. The coordinator and its device/START/budget/cleanup gates remain in use. The user delegated execution of the approved single attempt; the handoff does not expand the test scope.
+
+The bridge follows this sequence:
+
+1. Start the existing remote launcher and allow exact AWS readiness/marked-seed setup to complete. Wait for the precise hidden-token prompt and verify the child PTY has ECHO and ICANON off.
+2. Only then bind the single-use intake on `127.0.0.1:3410`. Binding before this prompt would conflict with the coordinator's preflight port checks.
+3. Use supported browser clipboard/password-form APIs with the token held only in runtime memory. Submit to the same-origin loopback form using its one-use random URL nonce. The intake enforces the exact Host/Origin, a bounded body and60second expiry; it emits no secret values and uses no-store/CSP controls.
+4. Close the intake HTTP connection and listener completely **before** writing the token to the child's hidden input. This frees3410 before Next web starts. The bridge rechecks the prompt/PTY state at the transfer boundary.
+5. Wait for the actual discovered-device prompt, select an authorized device, then submit START only at its corresponding hidden prompt. Keep the existing process alive through scoped cleanup.
+
+The first browser handoff was rejected because a `no-referrer` policy produced `Origin: null` in Chrome. It was cancelled cleanly with no provider attempt. The correction uses a same-origin Referrer-Policy; strict Origin validation was preserved rather than accepting null origins. The subsequent actual Chrome→local form→Node hidden-input probe passed with fictional text and no echo. In-memory transfer of the existing real temporary token was then accepted without plaintext in chat, files, command arguments or screenshots. That single authorized run then completed with no observed incoming audio; its final result and verified AWS cleanup are recorded below. The handoff success is not a provider pass.
+
+The bridge accepts the same approved flags as the remote launcher. This invocation documents the completed run's supported path. **The single approved attempt has been used; do not rerun without new authorization**, even though no paid capture reservation was consumed:
+
+```sh
+cd /Users/frank/mygit/CaptionDoor
+python3 scripts/provider-session-browser-bridge.py --start --approved-root --approved-aws-writes --approved-cloud-storage --approved-cleanup --profile tally --baseline /Users/frank/mygit/CaptionDoor/output/provider-remote-preparation-20261023/approved-baseline.json
+```
+
+The original user-run `corepack pnpm provider:session:remote` command with the same flags remains a fallback. In that path, paste only at the hidden prompt, single line followed by a separate Enter; never put a token in chat, a shell assignment, a command argument or a file. A replacement token must not be generated silently if the existing one has expired.
+
+The SDK rechecks temporary-session presence, credential-expiry metadata and actual runtime identity. Root is accepted only through `--approved-root` and the exact remote marker, with a durable reservation and server deadline before paid capture. The owned Next development child now uses `--webpack` for the previously observed Turbopack IPC limitation;74focused tests passed after that change. Neither that test pass nor the fictional handoff probe proves media tracks, Transcribe execution or cleanup.
+
+## Actual bounded attempt outcome
+
+Run `92ab9ae7-b66f-4e7b-bac4-d25b91d23cf2` started at `2026-10-23T18:31:49.545Z` and its report ended at `2026-10-23T18:32:29.374Z`, including harness processing/cleanup. The report result is **SKIP**, category `INCOMING_AUDIO_NOT_OBSERVED_WITHIN_BOUND`; the coordinator returned **BLOCKED**, exit2. The discovered sole authorized device was selected as1 and START was sent once. No incoming audio/video tracks were observed, and no PCM chunks, AWS final captions, fixture captions or resident microphone input occurred. AWS Transcribe capture was not started by the harness. This does not establish the underlying Ring media failure cause.
+
+The remote reservation ledger was unchanged before/after: zero reserved seconds, zero estimated microUSD and zero attempts. No capture identity/reservation receipt was observed. Those counters do not authorize another attempt and are not an AWS billing observation.
+
+The final strongly read cleanup receipt **PASSED**: own visit rows0, runtime visit rows0, `cleanupCredentialsAbsent:true`, `cleanupActionUnconfirmed:false`. The backend checkpoint recovered exact media UUID `d6c2ff5f-e3a7-45e2-9f91-de3dfcfdbfaa` for cleanup verification. Both `providerDeleteObserved` and `providerExpiryElapsed` were false: **physical own-data/token-copy absence in AWS is verified; Ring DELETE/expiry is unobserved**. Do not claim external provider erasure from these database reads.
+
+The coordinator printed `PHYSICAL_AWS_CLEANUP_CONFIRMED` and `OWNED_PROCESSES_STOPPED_SECRETS_DISCARDED`; owned3410/3411 listeners were verified absent. That is controlled process/secret-reference disposal, not a claim of secure erasure of JavaScript or provider memory. Sanitized `result.json`, `cleanup-verification.json` and media/scope checkpoints are under `output/provider-smoke/92ab9ae7-b66f-4e7b-bac4-d25b91d23cf2/`. Retained tables and budget metadata remain. No second attempt was started or authorized.
+
+## Acceptance and cleanup
+
+Report LOCAL event provenance, official Playground media and AWS transcription separately. A provider pass requires actual incoming audio, outgoing correctly sized PCM, nonempty AWS final captions persisted for the own media session and visible finalized captions. A LOCAL feeder event does not prove a real Ring button-press webhook; an audio track alone does not prove intelligible speech. Missing audio or no nonempty final is not a provider pass. Actual AWS billing has not been observed.
+
+Each coordinator-owned backend writes a credential-free evidence checkpoint with only run/visit/media UUIDs and phase before provider creation. This is test evidence, not application persistence or a token copy. It preserves the exact media cleanup ID through failed negotiation. Missing/pre-allocation evidence permits a no-provider-creation conclusion only after the checkpoint-aware owned web process stops.
+
+After the attempt, stop capture/media, close/delete only this run's content and strongly verify the exact known visit partitions and encrypted cleanup copy are absent. TTL is a delayed backstop, not erasure proof. Keep the temporary key and its owning process while cleanup is pending. Report provider DELETE observation separately from provider expiry and physical AWS content absence; then stop only this run's CaptionDoor services and discard the temporary key. Never scan or broadly delete data. Retained tables are not automatically removed.
+
+## Verification boundaries and artifacts
+
+The preparation checkpoint passed TypeScript and 812 unit tests, CLI help/non-TTY refusal, offline three-table synthesis, fictional owned-process cancellation, and webpack production/packaging checks. Those are distinct from the actual CREATE_COMPLETE and setup receipts above. No unit or build result substitutes for real provider acceptance or cleanup observations. See [test-results.md](test-results.md) for the dated failure history and exact layers.
+
+A subsequent diagnostic fix in `scripts/provider-media-diagnostics.ts` and the provider harness records media/ready HTTP status plus a fixed allowlisted application error code, without response bodies, SDP or messages. Known API failures or unobserved responses are classified FAIL instead of a generic SKIP. Its22privacy/classification unit tests and TypeScript passed. This change is for future explicitly authorized runs only: the actual report above is unchanged, and its exact failure cause remains **UNRECORDED**. Audio/video flags are UI-harness observations, not proof of packet absence. No additional provider attempt occurred. The final execution/cleanup receipt is `output/provider-remote-preparation-20261023/single-attempt-execution-result.json`.
+
+`approval-request.json` and the static offline `plan.json` preserve their preparation-time questions/blocked status. The approved receipt, populated operator-confirmed baseline, direct-template verification, stack request/status, setup result and `execution-receipt.json` under `output/provider-remote-preparation-20261023/` record the subsequent authorized execution. The earlier execution receipt records stack/setup/token presence and the then-pending user TTY handoff, with no secret or provider data. The supported browser handoff and completed run described above supersede that pending-handoff status. Provisioning, database allowance, encrypted AWS token-copy storage and baseline approval are no longer pending. The single attempt and verified exact-key AWS cleanup have completed. Provider media did not pass; the exact signaling/media failure cause was not recorded. There is no authorized automatic retry.

@@ -1,12 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   armRootSmokeDeadline,
   assertRootSmokePermit,
   issueRootSmokePermit,
+  recordRootSmokeIdentity,
   rootSmokeReceipt,
   type RootSmokePermit,
   type RootSmokeReservation,
 } from "../../packages/integrations/src/audio/root-smoke-permit";
+const retirement = vi.hoisted(() => ({ check: vi.fn() }));
+// Scope availability is a fixture here; filesystem retirement semantics have their own pure tests.
+vi.mock("../../packages/db/src/local-root-retirement", () => ({
+  assertLocalRootScopeAvailable: retirement.check,
+}));
 const env = {
   NODE_ENV: "development",
   CAPTIONDOOR_ENV: "local",
@@ -42,6 +48,9 @@ function reservation(): RootSmokeReservation {
     tablePrefix: "CaptionDoorProviderSmoke20261022",
   };
 }
+beforeEach(() => {
+  retirement.check.mockReset();
+});
 afterEach(() => vi.useRealTimers());
 describe("explicit in-process root smoke permits", () => {
   it("rejects a structural forgery and cannot issue provider proof before verified identity", () => {
@@ -92,5 +101,18 @@ describe("explicit in-process root smoke permits", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(stopped).toHaveBeenCalledTimes(1);
     expect(() => assertRootSmokePermit(permit, row, env)).toThrow(/permit/);
+  });
+  it("retirement blocks new issuance and reuse of an already armed verified permit", () => {
+    const row = reservation(),
+      permit = issueRootSmokePermit(row, env),
+      cancel = armRootSmokeDeadline(permit, vi.fn(), env);
+    recordRootSmokeIdentity(permit, "ROOT");
+    retirement.check.mockImplementation(() => {
+      throw new Error("scope retired");
+    });
+    expect(() => issueRootSmokePermit(row, env)).toThrow(/retired/);
+    expect(() => assertRootSmokePermit(permit, row, env)).toThrow(/retired/);
+    expect(() => rootSmokeReceipt(permit)).toThrow(/retired/);
+    cancel();
   });
 });

@@ -5,10 +5,10 @@ import {
   type APIResponse,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
   assertRootSmokeEnvironment,
   type Bootstrap,
   type Visit,
@@ -29,6 +29,16 @@ import {
   type RootSmokeBudgetEvidence,
   type SmokeStage,
 } from "../../scripts/provider-smoke-config";
+
+import {
+  remoteProviderBudgetEvidence,
+  remoteProviderReceiptEvidence,
+} from "../../scripts/remote-provider-evidence";
+import {
+  classifyProviderMediaWaitFailure,
+  sanitizeMediaHttpEvidence,
+  type ProviderMediaHttpDiagnostics,
+} from "../../scripts/provider-media-diagnostics";
 
 type Outcome = "PASS" | "FAIL" | "SKIP" | "BLOCKED";
 class SmokeFailure extends Error {
@@ -156,6 +166,15 @@ test("approved isolated Playground incoming media and optional AWS captions", as
     process.env.CAPTIONDOOR_ROOT_SMOKE !== undefined ||
     process.env.CAPTIONDOOR_ROOT_SMOKE_APPROVAL !== undefined;
   const rootSmokeRequested = process.env.CAPTIONDOOR_ROOT_SMOKE === "1";
+  const remoteSmokeRequested =
+    process.env.CAPTIONDOOR_ENV === "remote-provider";
+  const reservationRequired = rootSmokeRequested || remoteSmokeRequested;
+  const budgetEvidence = remoteSmokeRequested
+    ? remoteProviderBudgetEvidence
+    : rootSmokeBudgetEvidence;
+  const receiptEvidence = remoteSmokeRequested
+    ? remoteProviderReceiptEvidence
+    : rootSmokeReceiptEvidence;
   if (rootMarkersPresent) {
     try {
       if (stage !== "captions") throw new Error("Invalid root smoke stage");
@@ -168,7 +187,7 @@ test("approved isolated Playground incoming media and optional AWS captions", as
   }
   let prefix = "";
   try {
-    prefix = assertProviderSmokeEnvironment(process.env).tablePrefix;
+    prefix = assertActiveProviderSmokeEnvironment(process.env).tablePrefix;
   } catch {
     throw new Error("BLOCKED: isolated smoke configuration is required.");
   }
@@ -185,7 +204,27 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       "BLOCKED: run the approved launcher after zero-network preflight.",
     );
 
+  const ownedScope: {
+    householdId: "h1";
+    visitId?: string;
+    mediaSessionId?: string;
+    mediaAttempted: boolean;
+  } = { householdId: "h1", mediaAttempted: false };
+  const checkpointScope = async () => {
+    const directory = resolve("output/provider-smoke", runId);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      resolve(directory, "scope.tmp.json"),
+      JSON.stringify(ownedScope),
+    );
+    await rename(
+      resolve(directory, "scope.tmp.json"),
+      resolve(directory, "scope.json"),
+    );
+  };
+  await checkpointScope(); // Before any local event/media; no secret or content fields.
   const report = {
+    ownedScope,
     runId,
     stage,
     startedAt: new Date().toISOString(),
@@ -195,17 +234,23 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       event: "UNOBSERVED",
       media: "UNOBSERVED",
       transcript: "UNOBSERVED",
-      database: "DynamoDB Local",
+      database: remoteSmokeRequested ? "AWS DynamoDB" : "DynamoDB Local",
     },
     observed: {
       localHealth: false,
       providerMetadata: false,
       incomingAudioTrack: false,
+      incomingVideoTrack: false,
       awsFinalPersisted: false,
       residentFinalRendered: false,
     },
+    mediaHttp: {
+      start: null,
+      ready: null,
+    } as ProviderMediaHttpDiagnostics,
     counts: {
       mediaAttempts: 0,
+      incomingVideoTracks: 0,
       outgoingBinaryChunks: 0,
       outgoingBinaryBytes: 0,
       expectedSizedPcmFrames: 0,
@@ -232,13 +277,26 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       after: null as RootSmokeBudgetEvidence | null,
       actualAwsBillingObserved: false,
     },
+    remoteProviderSmoke: {
+      requested: remoteSmokeRequested,
+      rootIdentityVerified: false,
+      verifiedIdentity: "UNOBSERVED" as "UNOBSERVED" | "ROOT" | "NON_ROOT",
+      receipt: null as RootSmokeReceiptEvidence | null,
+      durableReservationLedgerObserved: false,
+      before: null as RootSmokeBudgetEvidence | null,
+      after: null as RootSmokeBudgetEvidence | null,
+      actualAwsBillingObserved: false,
+    },
     limits: {
       maximumMediaSeconds: 30,
       oneAttemptOnly: true,
-      totalApprovedAttemptsManuallyTracked: !rootSmokeRequested,
-      durableReservationBackstopRequested: rootSmokeRequested,
+      totalApprovedAttemptsManuallyTracked: !reservationRequired,
+      durableReservationBackstopRequested: reservationRequired,
     },
   };
+  const reservationReport = remoteSmokeRequested
+    ? report.remoteProviderSmoke
+    : report.rootSmoke;
   const evidenceDir = resolve("output/provider-smoke", runId);
   const context = await browser.newContext({
     baseURL: smokeOrigin,
@@ -250,9 +308,36 @@ test("approved isolated Playground incoming media and optional AWS captions", as
   let residentId = "";
   let mediaSessionId: string | undefined;
   let page: Awaited<ReturnType<typeof context.newPage>> | undefined;
+  const observeVideoTracks = async () => {
+    if (!page) return;
+    const count = await page
+      .evaluate(() =>
+        Array.from(document.querySelectorAll("video")).reduce(
+          (total, video) => {
+            const stream = video.srcObject;
+            return (
+              total +
+              (stream instanceof MediaStream
+                ? stream
+                    .getVideoTracks()
+                    .filter((track) => track.readyState === "live").length
+                : 0)
+            );
+          },
+          0,
+        ),
+      )
+      .catch(() => 0);
+    report.counts.incomingVideoTracks = Math.max(
+      report.counts.incomingVideoTracks,
+      count,
+    );
+    report.observed.incomingVideoTrack ||= count > 0;
+  };
   let currentStage = "LOCAL_HEALTH";
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let boundedMediaStop: Promise<void> | undefined;
+  const pendingMediaDiagnostics = new Set<Promise<void>>();
   let rootReceiptInvalid = false;
   try {
     const [web, worker] = await Promise.all([
@@ -282,6 +367,10 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       await context.request.get("/api/me", { timeout: 4000 }),
       "LOCAL_BOOTSTRAP_FAILED",
     );
+    requireCondition(
+      boot.household.id === "h1" && boot.user.id === "alex",
+      "FIXED_FICTIONAL_TENANT_REQUIRED",
+    );
     csrf = login.csrf || boot.csrf;
     residentId = boot.user.id;
     requireCondition(csrf && residentId, "LOCAL_SESSION_INVALID");
@@ -295,27 +384,23 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         boot.mode.transcribe === (stage === "captions" ? "aws" : "fixture"),
       "BOOTSTRAP_MODE_MISMATCH",
     );
-    if (rootSmokeRequested) {
-      currentStage = "ROOT_SMOKE_BUDGET_BEFORE";
+    if (reservationRequired) {
+      currentStage = "PROVIDER_RESERVATION_BUDGET_BEFORE";
       const budget = await json<unknown>(
         await context.request.get("/api/provider-smoke/budget", {
           timeout: 4000,
         }),
-        "ROOT_SMOKE_BUDGET_UNAVAILABLE",
+        "PROVIDER_RESERVATION_BUDGET_UNAVAILABLE",
       );
       try {
-        report.rootSmoke.before = rootSmokeBudgetEvidence(
-          budget,
-          process.env,
-          true,
-        );
+        reservationReport.before = budgetEvidence(budget, process.env, true);
       } catch {
         throw new SmokeFailure(
-          "ROOT_SMOKE_BUDGET_INVALID_OR_EXHAUSTED",
+          "PROVIDER_RESERVATION_BUDGET_INVALID_OR_EXHAUSTED",
           "BLOCKED",
         );
       }
-      report.rootSmoke.durableReservationLedgerObserved = true;
+      reservationReport.durableReservationLedgerObserved = true;
     }
     await json(
       await context.request.post("/api/settings", {
@@ -380,6 +465,8 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       "NEW_OWN_LOCAL_VISIT_NOT_ESTABLISHED",
     );
     ownedVisitId = pressed.visit.id;
+    ownedScope.visitId = ownedVisitId;
+    await checkpointScope();
     report.provenance.event = "LOCAL";
     await command(context.request, ownedVisitId, csrf, {
       type: "claim",
@@ -415,10 +502,10 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         return;
       socket.on("framereceived", (frame) => {
         if (
-          !rootSmokeRequested ||
+          !reservationRequired ||
           typeof frame.payload !== "string" ||
           frame.payload.length > 8192 ||
-          !report.rootSmoke.before
+          !reservationReport.before
         )
           return;
         let data;
@@ -434,14 +521,14 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         )
           return;
         try {
-          const receipt = rootSmokeReceiptEvidence(
-            data.rootSmoke,
-            report.rootSmoke.before,
+          const receipt = receiptEvidence(
+            remoteSmokeRequested ? data.remoteProviderSmoke : data.rootSmoke,
+            reservationReport.before,
             process.env,
           );
-          report.rootSmoke.receipt = receipt;
-          report.rootSmoke.verifiedIdentity = receipt.identity;
-          report.rootSmoke.rootIdentityVerified = receipt.identity === "ROOT";
+          reservationReport.receipt = receipt;
+          reservationReport.verifiedIdentity = receipt.identity;
+          reservationReport.rootIdentityVerified = receipt.identity === "ROOT";
         } catch {
           rootReceiptInvalid = true;
         }
@@ -460,6 +547,45 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         request.url() === `${smokeOrigin}/api/visits/${ownedVisitId}/media`
       )
         report.counts.mediaAttempts++;
+    });
+    page.on("response", (response) => {
+      if (response.request().method() !== "POST") return;
+      const endpoint = response.url();
+      const kind =
+        endpoint === `${smokeOrigin}/api/visits/${ownedVisitId}/media`
+          ? "start"
+          : endpoint === `${smokeOrigin}/api/visits/${ownedVisitId}/media/ready`
+            ? "ready"
+            : undefined;
+      if (!kind) return;
+      const status = response.status();
+      report.mediaHttp[kind] = sanitizeMediaHttpEvidence(status);
+      if (status >= 200 && status < 300) return; // Success contains SDP; never inspect its body.
+      const task = (async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const evidence = await Promise.race([
+            response
+              .json()
+              .then((body: unknown) => sanitizeMediaHttpEvidence(status, body)),
+            new Promise<ReturnType<typeof sanitizeMediaHttpEvidence>>(
+              (resolve) => {
+                timer = setTimeout(
+                  () => resolve(sanitizeMediaHttpEvidence(status)),
+                  500,
+                );
+              },
+            ),
+          ]);
+          report.mediaHttp[kind] = evidence;
+        } catch {
+          // Transport/parse errors may contain private response material. Keep only the known status.
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      })();
+      pendingMediaDiagnostics.add(task);
+      void task.finally(() => pendingMediaDiagnostics.delete(task));
     });
     await page.goto(`/visits/${ownedVisitId}`, {
       timeout: 8000,
@@ -496,6 +622,8 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         /* Finally still attempts close/revoke. */
       });
     }, 25_000);
+    ownedScope.mediaAttempted = true;
+    await checkpointScope(); // Durable own visit ID precedes the first media POST.
     await page
       .getByRole("button", { name: "Open incoming media", exact: true })
       .click({ timeout: 4000 });
@@ -514,16 +642,18 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         )
         .isVisible()
         .catch(() => false);
-      throw new SmokeFailure(
-        absent
-          ? "PLAYGROUND_HAS_NO_INCOMING_AUDIO_TRACK"
-          : "INCOMING_AUDIO_NOT_OBSERVED_WITHIN_BOUND",
-        "SKIP",
+      const failure = classifyProviderMediaWaitFailure(
+        report.mediaHttp,
+        absent,
       );
+      throw new SmokeFailure(failure.category, failure.result);
     }
+    await observeVideoTracks();
     report.observed.incomingAudioTrack = true;
     const mediaView = await getView(context.request, ownedVisitId);
     mediaSessionId = mediaView.visit.mediaSessionId;
+    ownedScope.mediaSessionId = mediaSessionId;
+    await checkpointScope();
     requireCondition(
       mediaView.visit.mediaSource === "RING" &&
         mediaView.visit.mediaStatus === "LIVE" &&
@@ -643,6 +773,7 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       error instanceof SmokeFailure ? error.category : `${currentStage}_FAILED`;
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);
+    await observeVideoTracks();
     if (boundedMediaStop) await boundedMediaStop;
     if (ownedVisitId) {
       try {
@@ -661,6 +792,8 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         }
         state = await getView(context.request, ownedVisitId);
         const mediaId = state.visit.mediaSessionId || mediaSessionId;
+        ownedScope.mediaSessionId = mediaId;
+        await checkpointScope(); // Retain the exact cleanup key before content deletion.
         if (mediaId) {
           const end = await context.request.delete(
             `/api/visits/${ownedVisitId}/media/${mediaId}`,
@@ -713,49 +846,51 @@ test("approved isolated Playground incoming media and optional AWS captions", as
         report.category = "OWN_FICTIONAL_VISIT_CLEANUP_INCOMPLETE";
       }
     }
-    if (rootSmokeRequested && report.rootSmoke.before) {
+    if (reservationRequired && reservationReport.before) {
       try {
         const budget = await json<unknown>(
           await context.request.get("/api/provider-smoke/budget", {
             timeout: 4000,
           }),
-          "ROOT_SMOKE_BUDGET_AFTER_UNAVAILABLE",
+          "PROVIDER_RESERVATION_BUDGET_AFTER_UNAVAILABLE",
         );
-        const after = rootSmokeBudgetEvidence(budget, process.env, false);
-        report.rootSmoke.after = after;
+        const after = budgetEvidence(budget, process.env, false);
+        reservationReport.after = after;
         const delta =
-          after.reservedSeconds - report.rootSmoke.before.reservedSeconds;
+          after.reservedSeconds - reservationReport.before.reservedSeconds;
         requireCondition(
           delta >= 0 && delta <= after.maxAttemptSeconds,
-          "ROOT_SMOKE_RESERVATION_DELTA_INVALID",
+          "PROVIDER_RESERVATION_RESERVATION_DELTA_INVALID",
         );
-        if (report.observed.awsFinalPersisted || report.rootSmoke.receipt)
+        if (report.observed.awsFinalPersisted || reservationReport.receipt)
           requireCondition(
             delta === after.maxAttemptSeconds,
-            "ROOT_SMOKE_AWS_FINAL_WITHOUT_DURABLE_RESERVATION",
+            "PROVIDER_RESERVATION_AWS_FINAL_WITHOUT_DURABLE_RESERVATION",
           );
-        if (report.rootSmoke.receipt)
+        if (reservationReport.receipt)
           requireCondition(
             after.reservedSeconds ===
-              report.rootSmoke.receipt.cumulativeReservedSeconds &&
+              reservationReport.receipt.cumulativeReservedSeconds &&
               after.cumulativeEstimatedMicrousd ===
-                report.rootSmoke.receipt.cumulativeEstimatedMicrousd,
-            "ROOT_SMOKE_RECEIPT_LEDGER_MISMATCH",
+                reservationReport.receipt.cumulativeEstimatedMicrousd,
+            "PROVIDER_RESERVATION_RECEIPT_LEDGER_MISMATCH",
           );
       } catch {
         report.result = "FAIL";
-        report.category = "ROOT_SMOKE_BUDGET_AFTER_INVALID_OR_UNAVAILABLE";
+        report.category =
+          "PROVIDER_RESERVATION_BUDGET_AFTER_INVALID_OR_UNAVAILABLE";
       }
     }
     if (
-      rootSmokeRequested &&
+      reservationRequired &&
       (rootReceiptInvalid ||
         ((report.counts.outgoingBinaryChunks > 0 ||
           report.observed.awsFinalPersisted) &&
-          !report.rootSmoke.receipt))
+          !reservationReport.receipt))
     ) {
       report.result = "FAIL";
-      report.category = "ROOT_SMOKE_WORKER_IDENTITY_RECEIPT_INVALID_OR_MISSING";
+      report.category =
+        "PROVIDER_RESERVATION_WORKER_IDENTITY_RECEIPT_INVALID_OR_MISSING";
     }
     if (
       report.counts.mediaAttempts > 1 ||
@@ -768,6 +903,17 @@ test("approved isolated Playground incoming media and optional AWS captions", as
       report.result = "FAIL";
       report.category = "LOCAL_BROWSER_CLEANUP_INCOMPLETE";
     });
+    await Promise.allSettled([...pendingMediaDiagnostics]);
+    if (report.result === "SKIP") {
+      const failure = classifyProviderMediaWaitFailure(
+        report.mediaHttp,
+        report.category === "PLAYGROUND_HAS_NO_INCOMING_AUDIO_TRACK",
+      );
+      if (failure.result === "FAIL") {
+        report.result = failure.result;
+        report.category = failure.category;
+      }
+    }
     await mkdir(evidenceDir, { recursive: true });
     await writeFile(
       resolve(evidenceDir, "result.json"),

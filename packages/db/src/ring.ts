@@ -1,6 +1,6 @@
 import {
   AppError,
-  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
   presets,
   type Actor,
   type Visit,
@@ -92,7 +92,7 @@ export async function press(input: {
         403,
         "Local event simulation is disabled.",
       );
-    assertProviderSmokeEnvironment(process.env);
+    assertActiveProviderSmokeEnvironment(process.env);
     if (
       tables.config !== process.env.CAPTIONDOOR_CONFIG_TABLE ||
       tables.visits !== process.env.CAPTIONDOOR_VISITS_TABLE ||
@@ -103,7 +103,7 @@ export async function press(input: {
         403,
         "The running database does not match the explicit smoke scope.",
       );
-    assertProviderSmokeEnvironment({
+    assertActiveProviderSmokeEnvironment({
       ...process.env,
       CAPTIONDOOR_DB_MODE: databaseConfig.mode,
       CAPTIONDOOR_ENV: databaseConfig.environment,

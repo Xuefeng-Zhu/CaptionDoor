@@ -1,5 +1,7 @@
 import {
-  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
+  assertRemoteProviderSmokeEnvironment,
+  remoteProviderSmokeConfig,
   assertRootSmokeEnvironment,
   type ConversationItem,
 } from "@captiondoor/domain";
@@ -25,6 +27,9 @@ export function providerSmokePreflight(
   stage: SmokeStage,
 ): SmokePreflight {
   const blockers: string[] = [];
+  const remote = env.CAPTIONDOOR_ENV === "remote-provider";
+  if (remote && stage !== "captions")
+    blockers.push("REMOTE_PROVIDER_CAPTIONS_SCOPE_REQUIRED");
   const rootMarkersPresent =
     env.CAPTIONDOOR_ROOT_SMOKE !== undefined ||
     env.CAPTIONDOOR_ROOT_SMOKE_APPROVAL !== undefined;
@@ -39,7 +44,7 @@ export function providerSmokePreflight(
   }
   let tablePrefix: string | undefined;
   try {
-    tablePrefix = assertProviderSmokeEnvironment(env).tablePrefix;
+    tablePrefix = assertActiveProviderSmokeEnvironment(env).tablePrefix;
   } catch {
     blockers.push("ISOLATED_LOCAL_CONFIGURATION_REQUIRED");
   }
@@ -70,7 +75,15 @@ export function providerSmokePreflight(
   } catch {
     // The public result includes only the category, never the supplied URL.
   }
-  if (!localEndpoint) blockers.push("HOST_LOCAL_DATABASE_ENDPOINT_REQUIRED");
+  if (!remote && !localEndpoint)
+    blockers.push("HOST_LOCAL_DATABASE_ENDPOINT_REQUIRED");
+  if (remote) {
+    try {
+      assertRemoteProviderSmokeEnvironment(env);
+    } catch {
+      blockers.push("ISOLATED_REMOTE_CONFIGURATION_REQUIRED");
+    }
+  }
   if (env.TRANSCRIBE_MODE !== (stage === "captions" ? "aws" : "fixture"))
     blockers.push("STAGE_TRANSCRIPTION_MODE_MISMATCH");
   if (stage === "captions") {
@@ -118,13 +131,14 @@ export function assertProviderSmokeHealth(
   const a = web as Record<string, unknown> | null;
   const b = worker as Record<string, unknown> | null;
   const transcription = stage === "captions" ? "aws" : "fixture";
+  const remote = tablePrefix === remoteProviderSmokeConfig.tablePrefix;
   if (
     !a ||
     !b ||
     a.status !== "ok" ||
     a.database !== "DynamoDB" ||
-    a.databaseMode !== "local" ||
-    a.environment !== "local" ||
+    a.databaseMode !== (remote ? "aws" : "local") ||
+    a.environment !== (remote ? "remote-provider" : "local") ||
     a.authMode !== "demo" ||
     a.ringMode !== "playground" ||
     a.transcribeMode !== transcription ||
@@ -132,9 +146,9 @@ export function assertProviderSmokeHealth(
     a.providerSmokeTablePrefix !== tablePrefix ||
     b.status !== "ok" ||
     b.worker !== "single" ||
-    b.databaseMode !== "local" ||
-    b.environment !== "local" ||
-    b.transport !== "local-due-poller" ||
+    b.databaseMode !== (remote ? "aws" : "local") ||
+    b.environment !== (remote ? "remote-provider" : "local") ||
+    b.transport !== (remote ? "aws-due-poller" : "local-due-poller") ||
     b.transcribe !== transcription ||
     b.providerSmoke !== true ||
     b.providerSmokeTablePrefix !== tablePrefix
@@ -184,6 +198,25 @@ export function providerSmokeChildEnvironment(
   if (env.CAPTIONDOOR_ROOT_SMOKE === "1") {
     assertRootSmokeEnvironment(env);
     child.DYNAMODB_ENDPOINT = env.DYNAMODB_ENDPOINT;
+  }
+  if (env.CAPTIONDOOR_ENV === "remote-provider") {
+    assertRemoteProviderSmokeEnvironment(env);
+    // Metadata only: never forward AWS profile, credentials, token or encryption key.
+    for (const key of [
+      "AWS_ACCOUNT_ID",
+      "AWS_REGION",
+      "CAPTIONDOOR_AWS_TABLE_PREFIX",
+      "CAPTIONDOOR_REMOTE_PROVIDER_SMOKE",
+      "CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL",
+      "CAPTIONDOOR_REMOTE_PROVIDER_ROOT_APPROVAL",
+      "CAPTIONDOOR_REMOTE_PROVIDER_WRITES_APPROVAL",
+      "CAPTIONDOOR_REMOTE_PROVIDER_CLOUD_COPY_APPROVAL",
+      "CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_APPROVAL",
+      "CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_SECONDS",
+      "CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_MICROUSD",
+      "CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_SHA256",
+    ])
+      child[key] = env[key];
   }
   return {
     ...child,

@@ -1,4 +1,5 @@
 import { AppError, assertRootSmokeEnvironment } from "@captiondoor/domain";
+import { assertLocalRootScopeAvailable } from "../../../db/src/local-root-retirement";
 
 type Env = Record<string, string | undefined>;
 export type RootSmokeReservation = {
@@ -32,6 +33,7 @@ function denied(): never {
 }
 function validate(permit: RootSmokeReservation, env: Env, now: number) {
   const config = assertRootSmokeEnvironment(env);
+  assertLocalRootScopeAvailable();
   if (
     permit.scope !== config.scope ||
     permit.accountId !== config.accountId ||
@@ -108,11 +110,13 @@ export function recordRootSmokeIdentity(
   permit: RootSmokePermit,
   identity: "ROOT" | "NON_ROOT",
 ): void {
+  assertLocalRootScopeAvailable();
   const state = issued.get(permit);
   if (!state?.armed) denied();
   state.identity = identity;
 }
 export function rootSmokeReceipt(permit: RootSmokePermit) {
+  assertLocalRootScopeAvailable();
   const state = issued.get(permit);
   if (!state?.armed || !state.identity) denied();
   return {

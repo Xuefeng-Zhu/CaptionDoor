@@ -1,5 +1,8 @@
 import type { DynamoDBClientConfig } from "@aws-sdk/client-dynamodb";
-import { validateModes } from "@captiondoor/domain";
+import {
+  assertRemoteProviderSmokeEnvironment,
+  validateModes,
+} from "@captiondoor/domain";
 
 type Env = Record<string, string | undefined>;
 export type DatabaseTables = {
@@ -9,7 +12,7 @@ export type DatabaseTables = {
 };
 export type DatabaseConfig = {
   mode: "local" | "aws";
-  environment: "local" | "remote-demo" | "production";
+  environment: "local" | "remote-demo" | "remote-provider" | "production";
   region: string;
   tables: DatabaseTables;
   pollIntervalMs: number;
@@ -26,13 +29,25 @@ export function resolveDatabaseConfig(env: Env): DatabaseConfig {
   validateModes(env);
   const mode = env.CAPTIONDOOR_DB_MODE;
   const environment = env.CAPTIONDOOR_ENV;
+  const remoteProvider =
+    environment === "remote-provider" ||
+    Object.entries(env).some(
+      ([key, value]) =>
+        key.startsWith("CAPTIONDOOR_REMOTE_PROVIDER_") && value !== undefined,
+    )
+      ? assertRemoteProviderSmokeEnvironment(env)
+      : undefined;
   if (mode !== "local" && mode !== "aws")
     throw new Error(
       "Set CAPTIONDOOR_DB_MODE explicitly to local or aws. No database fallback is used.",
     );
-  if (!["local", "remote-demo", "production"].includes(environment || ""))
+  if (
+    !["local", "remote-demo", "remote-provider", "production"].includes(
+      environment || "",
+    )
+  )
     throw new Error(
-      "Set CAPTIONDOOR_ENV explicitly to local, remote-demo or production.",
+      "Set CAPTIONDOOR_ENV explicitly to local, remote-demo, remote-provider or production.",
     );
   if (
     env.NODE_ENV === "production" &&
@@ -154,9 +169,11 @@ export function resolveDatabaseConfig(env: Env): DatabaseConfig {
     env.CAPTIONDOOR_AWS_TABLE_PREFIX ||
     (environment === "remote-demo" ? "CaptionDoorDev" : "CaptionDoor");
   const validPrefix =
-    environment === "remote-demo"
-      ? /^CaptionDoorDev(?:-[a-z0-9][a-z0-9-]{0,39})?$/.test(prefix)
-      : /^CaptionDoor(?:Prod(?:-[a-z0-9][a-z0-9-]{0,39})?)?$/.test(prefix);
+    environment === "remote-provider"
+      ? prefix === remoteProvider?.tablePrefix
+      : environment === "remote-demo"
+        ? /^CaptionDoorDev(?:-[a-z0-9][a-z0-9-]{0,39})?$/.test(prefix)
+        : /^CaptionDoor(?:Prod(?:-[a-z0-9][a-z0-9-]{0,39})?)?$/.test(prefix);
   if (!validPrefix)
     throw new Error(
       "AWS table namespace does not match the selected environment.",
@@ -192,7 +209,8 @@ export function resolveDatabaseConfig(env: Env): DatabaseConfig {
   }
   return {
     mode,
-    environment: environment as "remote-demo" | "production",
+    environment: environment as
+      "remote-demo" | "remote-provider" | "production",
     region,
     accountId: env.AWS_ACCOUNT_ID!,
     tables,

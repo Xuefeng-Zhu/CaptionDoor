@@ -7,14 +7,14 @@ import {
 } from "@captiondoor/db";
 import {
   AppError,
-  assertProviderSmokeEnvironment,
+  assertActiveProviderSmokeEnvironment,
   type Actor,
 } from "@captiondoor/domain";
 import { origin } from "./http";
 
 /** Check both explicit environment and the already-created database client's captured scope. */
 export function assertProviderSmokeRuntime() {
-  const config = assertProviderSmokeEnvironment(process.env);
+  const config = assertActiveProviderSmokeEnvironment(process.env);
   if (
     tables.config !== process.env.CAPTIONDOOR_CONFIG_TABLE ||
     tables.visits !== process.env.CAPTIONDOOR_VISITS_TABLE ||
@@ -26,7 +26,7 @@ export function assertProviderSmokeRuntime() {
       403,
       "The running client does not match the explicitly selected smoke scope.",
     );
-  assertProviderSmokeEnvironment({
+  assertActiveProviderSmokeEnvironment({
     ...process.env,
     CAPTIONDOOR_DB_MODE: databaseConfig.mode,
     CAPTIONDOOR_ENV: databaseConfig.environment,
@@ -41,10 +41,25 @@ export function assertProviderSmokeRuntime() {
 export function providerSmokeRuntimeStatus(): {
   providerSmoke: boolean;
   providerSmokeTablePrefix?: string;
+  providerSessionId?: string;
+  providerCheckpointProtocol?: string;
 } {
   try {
     const { tablePrefix } = assertProviderSmokeRuntime();
-    return { providerSmoke: true, providerSmokeTablePrefix: tablePrefix };
+    return {
+      providerSmoke: true,
+      providerSmokeTablePrefix: tablePrefix,
+      providerCheckpointProtocol:
+        process.env.CAPTIONDOOR_PROVIDER_CHECKPOINT_PROTOCOL === "v1"
+          ? "v1"
+          : undefined,
+      providerSessionId:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          process.env.CAPTIONDOOR_PROVIDER_SESSION_ID || "",
+        )
+          ? process.env.CAPTIONDOOR_PROVIDER_SESSION_ID
+          : undefined,
+    };
   } catch {
     return { providerSmoke: false };
   }

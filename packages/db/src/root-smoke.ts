@@ -19,6 +19,7 @@ import {
 } from "./repository";
 import { resident, authConditions } from "./auth";
 import { authorizeCapture } from "./capture";
+import { assertLocalRootScopeAvailable } from "./local-root-retirement";
 
 export type RootSmokeReservation = {
   attemptId: string;
@@ -54,6 +55,7 @@ export type RootSmokeBudget = {
 };
 function runtimePolicy(): RootSmokeConfig {
   const config = assertRootSmokeEnvironment(process.env);
+  assertLocalRootScopeAvailable();
   if (
     databaseConfig.mode !== "local" ||
     databaseConfig.environment !== "local" ||

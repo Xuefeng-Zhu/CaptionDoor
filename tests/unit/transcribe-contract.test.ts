@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@captiondoor/domain";
 import type {
   StartStreamTranscriptionCommandInput,
   TranscriptEvent,
@@ -11,6 +12,10 @@ import {
   issueRootSmokePermit,
   rootSmokeReceipt,
 } from "../../packages/integrations/src/audio/root-smoke-permit";
+import {
+  issueRemoteProviderPermit,
+  remoteProviderSmokeReceipt,
+} from "../../packages/integrations/src/audio/remote-provider-permit";
 import { AwsPcmStream } from "../../packages/integrations/src/audio/transcribe";
 
 const transport = vi.hoisted(() => ({
@@ -21,6 +26,11 @@ const transport = vi.hoisted(() => ({
   identityDestroy: vi.fn(),
   streamConfigs: [] as Array<Record<string, unknown>>,
   identityConfigs: [] as Array<Record<string, unknown>>,
+}));
+const retirement = vi.hoisted(() => ({ check: vi.fn() }));
+// Isolate the root-available transport fixture from the user's actual retirement marker.
+vi.mock("../../packages/db/src/local-root-retirement", () => ({
+  assertLocalRootScopeAvailable: retirement.check,
 }));
 vi.mock("@aws-sdk/client-transcribe-streaming", () => ({
   TranscribeStreamingClient: class {
@@ -59,6 +69,12 @@ const env = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  retirement.check.mockReset();
+  transport.credentials.mockReset().mockResolvedValue({
+    accessKeyId: "fixture-only",
+    secretAccessKey: "fixture-only",
+    sessionToken: "fixture-only-session",
+  });
   transport.streamConfigs.length = 0;
   transport.identityConfigs.length = 0;
   transport.identitySend.mockReset().mockResolvedValue(identity);
@@ -304,14 +320,15 @@ const rootTestEnv = {
 function rootPermit() {
   for (const [key, value] of Object.entries(rootTestEnv))
     vi.stubEnv(key, value);
+  const issuedAt = Date.now();
   return issueRootSmokePermit({
     attemptId: "12345678-1234-4234-8234-123456789012",
     scope: rootTestEnv.CAPTIONDOOR_ROOT_SMOKE_APPROVAL,
     accountId: rootTestEnv.TRANSCRIBE_AWS_ACCOUNT_ID,
     region: rootTestEnv.TRANSCRIBE_AWS_REGION,
     householdId: "fictional-household",
-    issuedAt: Date.now(),
-    expiresAt: Date.now() + 30_000,
+    issuedAt,
+    expiresAt: issuedAt + 30_000,
     maxSeconds: 30,
     reservedSeconds: 30,
     cumulativeReservedSeconds: 30,
@@ -365,6 +382,19 @@ describe("one-off root stream with mocked transports only", () => {
     await otherStream.run();
     expect(transport.streamSend).not.toHaveBeenCalled();
   });
+  it("retirement after root identity preparation prevents the paid SDK stream", async () => {
+    const permit = rootPermit(),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue(approvedRootIdentity);
+    const stream = new AwsPcmStream("root-media", vi.fn(), failure, permit);
+    await stream.prepare();
+    retirement.check.mockImplementation(() => {
+      throw new AppError("ROOT_SMOKE_SCOPE_RETIRED", 403, "scope retired");
+    });
+    await stream.run();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledExactlyOnceWith("ROOT_SMOKE_SCOPE_RETIRED");
+  });
   it("server deadline aborts SDK transport and discards PCM without browser cleanup", async () => {
     vi.useFakeTimers();
     const permit = rootPermit(),
@@ -416,6 +446,354 @@ describe("one-off root stream with mocked transports only", () => {
     expect(transport.streamSend).not.toHaveBeenCalled();
     expect(failure).toHaveBeenCalledExactlyOnceWith(
       "ROOT_SMOKE_DURATION_LIMIT",
+    );
+  });
+});
+
+const remoteTestEnv = {
+  NODE_ENV: "development",
+  CAPTIONDOOR_ENV: "remote-provider",
+  CAPTIONDOOR_DB_MODE: "aws",
+  AUTH_MODE: "demo",
+  RING_MODE: "playground",
+  TRANSCRIBE_MODE: "aws",
+  APP_ORIGIN: "http://127.0.0.1:3410",
+  CAPTIONDOOR_PROVIDER_SMOKE: "1",
+  CAPTIONDOOR_REMOTE_PROVIDER_SMOKE: "1",
+  CAPTIONDOOR_REMOTE_PROVIDER_WRITES_APPROVAL:
+    "captiondoor-remote-provider-verification-20261023",
+  CAPTIONDOOR_REMOTE_PROVIDER_CLOUD_COPY_APPROVAL:
+    "captiondoor-remote-provider-verification-20261023",
+  CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL:
+    "captiondoor-remote-provider-verification-20261023",
+  CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_APPROVAL:
+    "captiondoor-remote-provider-verification-20261023",
+  CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_SECONDS: "30",
+  CAPTIONDOOR_REMOTE_PROVIDER_PREVIOUS_MICROUSD: "12000",
+  CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_SHA256: "a".repeat(64),
+  CAPTIONDOOR_SMOKE_APPROVAL: "captions",
+  AWS_ACCOUNT_ID: "256604024085",
+  AWS_REGION: "us-east-1",
+  TRANSCRIBE_AWS_ACCOUNT_ID: "256604024085",
+  TRANSCRIBE_AWS_REGION: "us-east-1",
+  CAPTIONDOOR_AWS_TABLE_PREFIX: "CaptionDoorDevProviderSmoke20261023",
+  CAPTIONDOOR_CONFIG_TABLE: "CaptionDoorDevProviderSmoke20261023Config",
+  CAPTIONDOOR_VISITS_TABLE: "CaptionDoorDevProviderSmoke20261023Visits",
+  CAPTIONDOOR_RUNTIME_TABLE: "CaptionDoorDevProviderSmoke20261023Runtime",
+};
+function remotePermit(allowRoot = false) {
+  for (const name of [
+    "CAPTIONDOOR_ROOT_SMOKE",
+    "CAPTIONDOOR_ROOT_SMOKE_APPROVAL",
+    "DYNAMODB_ENDPOINT",
+  ])
+    vi.stubEnv(name, undefined);
+  for (const [key, value] of Object.entries(remoteTestEnv))
+    vi.stubEnv(key, value);
+  vi.stubEnv(
+    "CAPTIONDOOR_REMOTE_PROVIDER_ROOT_APPROVAL",
+    allowRoot
+      ? remoteTestEnv.CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL
+      : undefined,
+  );
+  const issuedAt = Date.now();
+  return issueRemoteProviderPermit({
+    attemptId: "12345678-1234-4234-8234-123456789012",
+    scope: remoteTestEnv.CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL,
+    accountId: remoteTestEnv.AWS_ACCOUNT_ID,
+    region: remoteTestEnv.AWS_REGION,
+    tablePrefix: remoteTestEnv.CAPTIONDOOR_AWS_TABLE_PREFIX,
+    householdId: "fictional-household",
+    previousSeconds: 30,
+    previousMicrousd: 12_000,
+    baselineSha256: remoteTestEnv.CAPTIONDOOR_REMOTE_PROVIDER_BASELINE_SHA256,
+    issuedAt,
+    expiresAt: issuedAt + 30_000,
+    maxSeconds: 30,
+    reservedSeconds: 30,
+    cumulativeReservedSeconds: 60,
+    cumulativeEstimatedMicrousd: 24_000,
+  });
+}
+const approvedRemoteIdentity = {
+  Account: remoteTestEnv.AWS_ACCOUNT_ID,
+  Arn: `arn:aws:sts::${remoteTestEnv.AWS_ACCOUNT_ID}:assumed-role/CaptionDoorProviderSmoke/unit`,
+};
+describe("bounded remote stream with mocked SDK transports only", () => {
+  it.each([
+    {},
+    { sessionToken: "" },
+    { sessionToken: "fixture-only-session", expiration: new Date(0) },
+  ])(
+    "refuses static or expired resolved credentials before STS %j",
+    async (metadata) => {
+      const permit = remotePermit(),
+        failure = vi.fn();
+      transport.credentials.mockResolvedValue({
+        accessKeyId: "fixture-only",
+        secretAccessKey: "fixture-only",
+        ...metadata,
+      });
+      const stream = new AwsPcmStream(
+        "remote-media",
+        vi.fn(),
+        failure,
+        undefined,
+        permit,
+      );
+      await stream.run();
+      expect(transport.identitySend).not.toHaveBeenCalled();
+      expect(transport.streamSend).not.toHaveBeenCalled();
+      expect(failure).toHaveBeenCalledExactlyOnceWith(
+        "TRANSCRIBE_AWS_IDENTITY_UNVERIFIED",
+      );
+    },
+  );
+  it("requires a durable permit even for an otherwise valid nonroot identity", async () => {
+    remotePermit();
+    transport.identitySend.mockResolvedValue(approvedRemoteIdentity);
+    const stream = new AwsPcmStream("remote-media", vi.fn(), vi.fn());
+    await expect(stream.prepare()).rejects.toMatchObject({
+      code: "REMOTE_PROVIDER_SMOKE_PERMIT_INVALID",
+    });
+    expect(transport.identitySend).not.toHaveBeenCalled();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    stream.stop();
+  });
+  it("rejects root on the remote path and never opens the paid transport", async () => {
+    const permit = remotePermit(),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue({
+      Account: remoteTestEnv.AWS_ACCOUNT_ID,
+      Arn: `arn:aws:iam::${remoteTestEnv.AWS_ACCOUNT_ID}:root`,
+    });
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.run();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledExactlyOnceWith(
+      "TRANSCRIBE_AWS_IDENTITY_UNVERIFIED",
+    );
+    expect(() => remoteProviderSmokeReceipt(permit)).toThrow();
+  });
+  it("accepts root only for the exact approved remote permit and reports ROOT", async () => {
+    const permit = remotePermit(true),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue({
+      Account: remoteTestEnv.AWS_ACCOUNT_ID,
+      Arn: `arn:aws:iam::${remoteTestEnv.AWS_ACCOUNT_ID}:root`,
+    });
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.prepare();
+    expect(remoteProviderSmokeReceipt(permit)).toMatchObject({
+      identity: "ROOT",
+    });
+    await stream.run();
+    expect(transport.streamSend).toHaveBeenCalledTimes(1);
+    expect(failure).not.toHaveBeenCalled();
+  });
+  it.each([
+    { Account: "999999999999", Arn: "arn:aws:iam::999999999999:root" },
+    {
+      Account: remoteTestEnv.AWS_ACCOUNT_ID,
+      Arn: `arn:aws-cn:iam::${remoteTestEnv.AWS_ACCOUNT_ID}:root`,
+    },
+  ])(
+    "root approval does not authorize a different account or partition %j",
+    async (identity) => {
+      const permit = remotePermit(true),
+        failure = vi.fn();
+      transport.identitySend.mockResolvedValue(identity);
+      const stream = new AwsPcmStream(
+        "remote-media",
+        vi.fn(),
+        failure,
+        undefined,
+        permit,
+      );
+      await stream.run();
+      expect(transport.streamSend).not.toHaveBeenCalled();
+      expect(failure).toHaveBeenCalledExactlyOnceWith(
+        "TRANSCRIBE_AWS_IDENTITY_UNVERIFIED",
+      );
+    },
+  );
+  it("root approval still requires temporary credentials and can be withdrawn before paid send", async () => {
+    const permit = remotePermit(true),
+      failure = vi.fn();
+    transport.credentials.mockResolvedValue({
+      accessKeyId: "fixture-only",
+      secretAccessKey: "fixture-only",
+    });
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.run();
+    expect(transport.identitySend).not.toHaveBeenCalled();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    transport.credentials.mockResolvedValue({
+      accessKeyId: "fixture-only",
+      secretAccessKey: "fixture-only",
+      sessionToken: "fixture-only-session",
+    });
+    const other = remotePermit(true);
+    transport.identitySend.mockResolvedValue({
+      Account: remoteTestEnv.AWS_ACCOUNT_ID,
+      Arn: `arn:aws:iam::${remoteTestEnv.AWS_ACCOUNT_ID}:root`,
+    });
+    const otherStream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      other,
+    );
+    await otherStream.prepare();
+    vi.stubEnv("CAPTIONDOOR_REMOTE_PROVIDER_ROOT_APPROVAL", undefined);
+    await otherStream.run();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+  });
+  it("issues a carried-budget receipt only after verified nonroot identity", async () => {
+    const permit = remotePermit();
+    transport.identitySend.mockResolvedValue(approvedRemoteIdentity);
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      vi.fn(),
+      undefined,
+      permit,
+    );
+    await stream.prepare();
+    expect(transport.credentials.mock.invocationCallOrder[0]).toBeLessThan(
+      transport.identitySend.mock.invocationCallOrder[0],
+    );
+    expect(remoteProviderSmokeReceipt(permit)).toMatchObject({
+      identity: "NON_ROOT",
+      previousSeconds: 30,
+      cumulativeReservedSeconds: 60,
+    });
+    await stream.run();
+    expect(transport.streamSend).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks temporary credentials after preparation before paid transport", async () => {
+    const permit = remotePermit(),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue(approvedRemoteIdentity);
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.prepare();
+    transport.credentials.mockResolvedValue({
+      accessKeyId: "fixture-only",
+      secretAccessKey: "fixture-only",
+    });
+    await stream.run();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledExactlyOnceWith(
+      "REMOTE_PROVIDER_TEMPORARY_CREDENTIALS_REQUIRED",
+    );
+  });
+  it("withdrawn remote approval after identity preparation prevents the paid stream", async () => {
+    const permit = remotePermit(),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue(approvedRemoteIdentity);
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.prepare();
+    vi.stubEnv("CAPTIONDOOR_REMOTE_PROVIDER_SMOKE_APPROVAL", "");
+    await stream.run();
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledExactlyOnceWith(
+      "REMOTE_PROVIDER_SMOKE_DISABLED",
+    );
+  });
+  it("server deadline aborts paid transport and discards PCM after at most 30 seconds", async () => {
+    vi.useFakeTimers();
+    const permit = remotePermit(),
+      failure = vi.fn();
+    transport.identitySend.mockResolvedValue(approvedRemoteIdentity);
+    transport.streamSend.mockImplementation(
+      (_cmd: unknown, opts: { abortSignal: AbortSignal }) =>
+        new Promise((_resolve, reject) =>
+          opts.abortSignal.addEventListener(
+            "abort",
+            () => reject(new Error("AbortError")),
+            { once: true },
+          ),
+        ),
+    );
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    await stream.prepare();
+    const running = stream.run();
+    await vi.waitFor(() =>
+      expect(transport.streamSend).toHaveBeenCalledTimes(1),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await running;
+    expect(failure).toHaveBeenCalledExactlyOnceWith(
+      "REMOTE_PROVIDER_SMOKE_DURATION_LIMIT",
+    );
+    expect(stream.push(new Uint8Array(3200))).toBe(false);
+    expect(transport.streamDestroy).toHaveBeenCalledTimes(1);
+  });
+  it("deadline during identity verification cannot open a later paid stream", async () => {
+    vi.useFakeTimers();
+    const permit = remotePermit(),
+      failure = vi.fn();
+    let finish!: (identity: typeof approvedRemoteIdentity) => void;
+    transport.identitySend.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const stream = new AwsPcmStream(
+      "remote-media",
+      vi.fn(),
+      failure,
+      undefined,
+      permit,
+    );
+    const running = stream.run();
+    await vi.waitFor(() =>
+      expect(transport.identitySend).toHaveBeenCalledTimes(1),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    finish(approvedRemoteIdentity);
+    await running;
+    expect(transport.streamSend).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledExactlyOnceWith(
+      "REMOTE_PROVIDER_SMOKE_DURATION_LIMIT",
     );
   });
 });
