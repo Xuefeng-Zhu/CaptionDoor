@@ -96,14 +96,13 @@ export function OnboardingScreen() {
       </header>
       <main id="main" className="onboarding-main">
         <section className="onboarding-intro">
-          <p className="eyebrow">WELCOME HOME</p>
           <h1>
             Your doorstep.
             <br />
             <em>In words.</em>
           </h1>
           <p className="intro-copy">
-            Understand what’s happening at your door without relying on sound.
+            Read incoming visitor speech, then handle the visit in person.
           </p>
           <div className="welcome-art" aria-hidden="true">
             <div className="welcome-arch" />
@@ -115,26 +114,24 @@ export function OnboardingScreen() {
               </span>
               <span className="welcome-knob" />
             </div>
-            <span className="art-word one">Hello.</span>
-            <span className="art-word two">I’m coming.</span>
+            <span className="art-word one">Incoming</span>
+            <span className="art-word two">captions.</span>
             <span className="art-line" />
           </div>
           <p className="intro-footnote">
-            You stay in control. We never answer, unlock a door, or reply for
-            you.
+            You choose when to open media and start captions. Ring speaker
+            replies aren’t supported.
           </p>
         </section>
         <section className="setup-panel" aria-labelledby="setup-title">
           <div className="section-top">
-            <p className="eyebrow">A GOOD PLACE TO START</p>
+            <p className="eyebrow">YOUR SETUP</p>
             <Pill tone={authMode === "demo" ? "amber" : "neutral"}>
               {authMode === "demo" ? "Local demo" : "Household setup"}
             </Pill>
           </div>
           <h2 id="setup-title">Make it your door.</h2>
-          <p>
-            Set up a shared household space, then choose how you communicate.
-          </p>
+          <p>One door. Clear captions. Your choice of what happens next.</p>
           <ErrorNotice message={error} />
           <ol className="setup-steps">
             <li>
@@ -143,7 +140,7 @@ export function OnboardingScreen() {
                 <h3>
                   {data
                     ? `You’re signed in as ${data.user.name}`
-                    : "Open your household"}
+                    : "Sign in to your household"}
                 </h3>
                 {data ? (
                   <p>App sign-in is separate from Ring account linking.</p>
@@ -152,8 +149,7 @@ export function OnboardingScreen() {
                     {authMode === "demo" ? (
                       <>
                         <p>
-                          This credential-free local demo uses explicit seeded
-                          identities. Choose a resident.
+                          Choose a resident for this credential-free local demo.
                         </p>
                         <div className="button-row">
                           <button
@@ -191,8 +187,7 @@ export function OnboardingScreen() {
                     ) : (
                       <>
                         <p>
-                          Sign in with your household account. App sign-in is
-                          separate from your Ring account.
+                          App sign-in is separate from Ring account linking.
                         </p>
                         <a className="button primary" href="/api/auth/login">
                           Sign in with Cognito <Arrow />
@@ -202,15 +197,12 @@ export function OnboardingScreen() {
                     <details className="invitation-join" open={!!pendingCsrf}>
                       <summary>Have a household invitation?</summary>
                       {pendingCsrf ? (
-                        <p>
-                          Your account is verified. Enter the private invitation
-                          code shared by a household owner.
-                        </p>
+                        <p>Enter the private code from your household owner.</p>
                       ) : (
                         <p>
-                          First sign in with Cognito to verify your account,
-                          then enter the invitation code. Seeded local demo
-                          identities already belong to their households.
+                          Verify your account with Cognito, then enter your
+                          invitation code. Local demo residents already belong
+                          to a household.
                         </p>
                       )}
                       {!pendingCsrf ? (
@@ -247,11 +239,9 @@ export function OnboardingScreen() {
               <span className="step-number">02</span>
               <div>
                 <h3>Choose one door</h3>
-                <p>
-                  {data
-                    ? `${data.doors[0]?.name || "Front door"} is selected for this household.`
-                    : "A single front door keeps the conversation focused."}
-                </p>
+                {!data ? (
+                  <p>Select the household door after signing in.</p>
+                ) : null}
                 {data ? (
                   <label className="door-choice">
                     <input type="radio" checked readOnly name="door" />
@@ -260,11 +250,11 @@ export function OnboardingScreen() {
                   </label>
                 ) : null}
                 <details>
-                  <summary>Connect a Ring account instead</summary>
+                  <summary>Ring connection</summary>
                   <p>
-                    Requires invited partner credentials or a Playground token.
-                    These are separate from this local simulator. Connection
-                    failures never switch silently to demo.
+                    Requires authorized partner or Playground access. Local
+                    simulation is separate; connection failures never switch
+                    silently to demo.
                   </p>
                   <a className="button secondary" href="/api/ring/connect">
                     Connect Ring <Arrow />
@@ -275,10 +265,8 @@ export function OnboardingScreen() {
             <li>
               <span className="step-number">03</span>
               <div>
-                <h3>Choose what you share</h3>
-                <p>
-                  Separate choices. No audio or video is recorded by this app.
-                </p>
+                <h3>Choose your permissions</h3>
+                <p>Separate choices. The app records no audio or video.</p>
                 <div className="check-list">
                   <label>
                     <input
@@ -308,9 +296,8 @@ export function OnboardingScreen() {
                       }}
                     />
                     <span>
-                      Allow incoming audio to be processed by AWS Transcribe
-                      when I start captions. Local demo transcripts are
-                      fixtures.
+                      Allow AWS Transcribe to process incoming audio when I
+                      start captions. Local demo transcripts are fixtures.
                     </span>
                   </label>
                   <label>
@@ -330,9 +317,9 @@ export function OnboardingScreen() {
                   </label>
                 </div>
                 <p className="small muted">
-                  Default content access retention: 24 hours. Expiry blocks
-                  access; physical deletion follows in a background job.
-                  Provider and backup limits are explained in Settings.
+                  Content access: {data?.settings.retentionHours ?? 24} hours.
+                  Expiry blocks access; physical deletion follows in a
+                  background job. See Settings for provider and backup limits.
                 </p>
                 {data ? (
                   <button
@@ -348,15 +335,14 @@ export function OnboardingScreen() {
             <li>
               <span className="step-number">04</span>
               <div>
-                <h3>Make it a shared routine</h3>
+                <h3>Share responsibility</h3>
                 <p>
                   {data
                     ? data.members.map((m) => m.name).join(" and ")
                     : authMode === "demo"
                       ? "Two seeded household members"
                       : "Household members"}{" "}
-                  can claim and hand over responsibility. Claiming never sends a
-                  message.
+                  can claim and hand over visits. Claiming sends no reply.
                 </p>
                 <div className="setup-links">
                   <Link href="/settings">
@@ -365,16 +351,24 @@ export function OnboardingScreen() {
                   <Link href="/settings#notifications">
                     Test notifications <Arrow />
                   </Link>
-                  {data?.doors[0] ? (
+                </div>
+                {data?.doors[0] ? (
+                  <details className="optional-text-setup">
+                    <summary>Optional visitor text</summary>
+                    <p>
+                      Visitors with a phone can use a separate web page. Replies
+                      go to that page.
+                    </p>
                     <a
+                      className="text-link"
                       href={`/api/sign/${data.doors[0].publicDoorId}`}
                       target="_blank"
                       rel="noreferrer"
                     >
                       Print a visitor sign <Arrow />
                     </a>
-                  ) : null}
-                </div>
+                  </details>
+                ) : null}
               </div>
             </li>
           </ol>
@@ -389,19 +383,20 @@ export function OnboardingScreen() {
             </Link>
             {authMode === "demo" ? (
               <p>
-                Try the complete text journey in{" "}
+                Practice incoming captions in{" "}
                 <Link href="/demo">Local demo</Link>.
               </p>
             ) : (
               <p>
-                You choose when to open media, start captions, and send a reply.
+                Open incoming captions when you choose. Handle the visit in
+                person.
               </p>
             )}
           </div>
         </section>
       </main>
       <footer className="onboarding-footer">
-        CaptionDoor supports communication. It does not identify visitors or
+        CaptionDoor never answers or unlocks. It does not identify visitors or
         make safety decisions.
       </footer>
     </div>

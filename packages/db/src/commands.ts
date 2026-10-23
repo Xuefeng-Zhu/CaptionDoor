@@ -174,6 +174,12 @@ export async function command(
         403,
         "Only the handler or owner can delete visit content.",
       );
+    if (cmd.type === "delete" && before.status !== "CLOSED")
+      throw new AppError(
+        "CLOSE_REQUIRED",
+        409,
+        "Close the visit with a recorded outcome before deleting retained content.",
+      );
     if (cmd.type === "handoff") {
       if (cmd.targetUserId === actor.userId)
         throw new AppError("VALIDATION", 400, "Choose another member.");
@@ -399,6 +405,7 @@ export async function command(
     } else if (cmd.type === "delete") {
       v.expiresAt = seconds();
       v.deleted = true;
+      delete v.pendingHandoff;
       v.status = "CLOSED";
       v.mediaStatus = "ENDED";
       delete v.audioLease;

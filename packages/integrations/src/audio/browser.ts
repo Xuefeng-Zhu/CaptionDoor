@@ -88,7 +88,7 @@ export async function startRemoteCapture(
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error("Caption authorization timed out."));
-      }, 5000);
+      }, 8000);
       const cleanup = () => {
         clearTimeout(timer);
         websocket.removeEventListener("message", received);

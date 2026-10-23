@@ -1,5 +1,6 @@
 import {
   AppError,
+  assertProviderSmokeEnvironment,
   presets,
   type Actor,
   type Visit,
@@ -22,6 +23,7 @@ import {
   type Key,
   type Job,
   tables,
+  databaseConfig,
   db,
   getItem,
   queryPK,
@@ -79,7 +81,44 @@ export async function press(input: {
   eventId: string;
   deliveryId: string;
   source?: "LOCAL" | "PLAYGROUND" | "LIVE";
+  localActor?: Actor;
 }): Promise<{ visit: Visit; duplicate: boolean }> {
+  const source = input.source || "LIVE";
+  let localActor: Actor | undefined;
+  if (source === "LOCAL" && (process.env.RING_MODE || "demo") !== "demo") {
+    if (process.env.RING_MODE !== "playground")
+      throw new AppError(
+        "DEMO_DISABLED",
+        403,
+        "Local event simulation is disabled.",
+      );
+    assertProviderSmokeEnvironment(process.env);
+    if (
+      tables.config !== process.env.CAPTIONDOOR_CONFIG_TABLE ||
+      tables.visits !== process.env.CAPTIONDOOR_VISITS_TABLE ||
+      tables.runtime !== process.env.CAPTIONDOOR_RUNTIME_TABLE
+    )
+      throw new AppError(
+        "PROVIDER_SMOKE_DISABLED",
+        403,
+        "The running database does not match the explicit smoke scope.",
+      );
+    assertProviderSmokeEnvironment({
+      ...process.env,
+      CAPTIONDOOR_DB_MODE: databaseConfig.mode,
+      CAPTIONDOOR_ENV: databaseConfig.environment,
+      CAPTIONDOOR_CONFIG_TABLE: tables.config,
+      CAPTIONDOOR_VISITS_TABLE: tables.visits,
+      CAPTIONDOOR_RUNTIME_TABLE: tables.runtime,
+    });
+    if (!input.localActor)
+      throw new AppError(
+        "FORBIDDEN",
+        403,
+        "The local smoke event requires an authorized owner.",
+      );
+    localActor = await resident(input.localActor, "membership");
+  }
   const account = await getItem(
     tables.config,
     `RINGACCOUNT#${input.accountId}`,
@@ -91,12 +130,11 @@ export async function press(input: {
       403,
       "Unknown Ring account or device.",
     );
-  const source = input.source || "LIVE";
-  if (source === "LOCAL" && (process.env.RING_MODE || "demo") !== "demo")
+  if (localActor && localActor.householdId !== account.householdId)
     throw new AppError(
-      "DEMO_DISABLED",
+      "FORBIDDEN",
       403,
-      "Local event simulation is disabled.",
+      "Local smoke event tenant does not match.",
     );
   const semantic = {
     PK: `SEMANTIC#${input.accountId}#${hashToken(input.eventId)}`,
@@ -107,6 +145,18 @@ export async function press(input: {
     SK: "DELIVERY",
   };
   for (let attempt = 0; attempt < 6; attempt++) {
+    if (localActor) {
+      localActor = await resident(localActor, "membership");
+      if (
+        (await member(localActor.householdId, localActor.userId)).role !==
+        "owner"
+      )
+        throw new AppError(
+          "FORBIDDEN",
+          403,
+          "Only the current owner can create a local smoke event.",
+        );
+    }
     const existing =
       (await getItem(tables.runtime, semantic.PK, semantic.SK)) ||
       (await getItem(tables.runtime, deliveryKey.PK, deliveryKey.SK));
@@ -121,6 +171,12 @@ export async function press(input: {
           "EXPIRED",
           410,
           "This event was already processed and its visit expired.",
+        );
+      if (localActor && old.eventSource !== "LOCAL")
+        throw new AppError(
+          "PROVIDER_SMOKE_ACTIVE_VISIT",
+          409,
+          "A local smoke event cannot be reported as a provider event.",
         );
       return { visit: clean<Visit>(old), duplicate: true };
     }
@@ -147,6 +203,12 @@ export async function press(input: {
         "STATE",
       );
     const p = await profile(account.householdId);
+    if (localActor && p.settings.consent.ring !== true)
+      throw new AppError(
+        "CONSENT_REQUIRED",
+        403,
+        "Ring consent was withdrawn before the local smoke event.",
+      );
     if (old && old.historyVersion !== 2) {
       await ensureTimeline(old.PK);
       old.historyVersion = 2;
@@ -156,6 +218,35 @@ export async function press(input: {
       old.status !== "CLOSED" &&
       !old.deleted &&
       old.expiresAt > seconds();
+    if (localActor && active && old!.eventSource !== "LOCAL")
+      throw new AppError(
+        "PROVIDER_SMOKE_ACTIVE_VISIT",
+        409,
+        "Close the existing provider visit before a local smoke event.",
+      );
+    const smokeChecks = localActor
+      ? authConditions(localActor, "membership")
+      : [];
+    if (localActor) {
+      const membershipCheck = smokeChecks.find(
+        (item) =>
+          item.ConditionCheck?.Key.SK === `MEMBER#${localActor!.userId}`,
+      )!.ConditionCheck;
+      membershipCheck.ConditionExpression += " AND #smokeRole = :smokeOwner";
+      membershipCheck.ExpressionAttributeNames = {
+        ...membershipCheck.ExpressionAttributeNames,
+        "#smokeRole": "role",
+      };
+      membershipCheck.ExpressionAttributeValues[":smokeOwner"] = "owner";
+      smokeChecks.push({
+        ConditionCheck: {
+          TableName: tables.config,
+          Key: { PK: p.PK, SK: p.SK },
+          ConditionExpression: "settings.consent.ring = :smokeConsent",
+          ExpressionAttributeValues: { ":smokeConsent": true },
+        },
+      });
+    }
     const visit: Visit = active
       ? { ...clean<Visit>(old!), version: old!.version + 1, updatedAt: now() }
       : {
@@ -188,6 +279,7 @@ export async function press(input: {
     try {
       await transact([
         state,
+        ...smokeChecks,
         {
           Update: {
             TableName: tables.config,
@@ -321,7 +413,10 @@ export async function revokeRingAccount(
         Update: {
           TableName: tables.config,
           Key: { PK: integration.PK, SK: integration.SK },
-          UpdateExpression: "SET #status = :revoked, revoked = :yes",
+          // Media rows already carry bounded access-only DELETE authorization.
+          // Revoke the account and erase reusable credentials/refresh leases atomically.
+          UpdateExpression:
+            "SET #status = :revoked, revoked = :yes REMOVE credentials, refreshOwner, refreshUntil",
           ConditionExpression:
             "attribute_not_exists(accountId) OR accountId = :account",
           ExpressionAttributeNames: { "#status": "status" },

@@ -1,11 +1,6 @@
 export type VisitStatus = "UNCLAIMED" | "CLAIMED" | "CLOSED";
 export type MediaStatus =
-  | "IDLE"
-  | "CONNECTING"
-  | "LIVE"
-  | "ENDED"
-  | "UNAVAILABLE"
-  | "INTERRUPTED";
+  "IDLE" | "CONNECTING" | "LIVE" | "ENDED" | "UNAVAILABLE" | "INTERRUPTED";
 export type DeliveryStatus = "ACCEPTED" | "DISPLAYED" | "CONFIRMED";
 export type Actor = {
   kind: "resident" | "guest";
@@ -171,3 +166,9 @@ export function validateModes(env: Record<string, string | undefined>) {
   if (!["fixture", "aws"].includes(env.TRANSCRIBE_MODE || "fixture"))
     throw new Error("Invalid TRANSCRIBE_MODE");
 }
+
+export { assertProviderSmokeEnvironment } from "./provider-smoke";
+export type { ProviderSmokeEnvironment } from "./provider-smoke";
+
+export { assertRootSmokeEnvironment, rootSmokeConfig } from "./root-smoke";
+export type { RootSmokeConfig } from "./root-smoke";

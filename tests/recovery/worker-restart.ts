@@ -7,7 +7,11 @@ import {
   expect as baseExpect,
   type BrowserContext,
 } from "@playwright/test";
-import { service, getItem, tables } from "@captiondoor/db";
+import { service, getItem, tables, databaseConfig } from "@captiondoor/db";
+import {
+  assertReplayTarget,
+  assertReplayWebModes,
+} from "../../scripts/judge-replay";
 import {
   resident,
   origin,
@@ -20,6 +24,7 @@ const expect = baseExpect.configure({ timeout: 20000 });
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const health = "http://127.0.0.1:3411/health";
 if (
+  databaseConfig.mode !== "local" ||
   !["127.0.0.1", "localhost"].includes(new URL(origin).hostname) ||
   process.env.NODE_ENV === "production"
 )
@@ -91,6 +96,15 @@ async function stop() {
   ]);
   await until(workerResponds, (value) => !value);
 }
+assertReplayTarget(origin, process.env.NODE_ENV);
+// A loopback web app may use remote DynamoDB; check its mode before any login or write.
+const webHealth = await fetch(`${origin}/api/health`, {
+  redirect: "error",
+  signal: AbortSignal.timeout(8000),
+});
+if (!webHealth.ok)
+  throw new Error("Local recovery web health precondition failed.");
+assertReplayWebModes(await webHealth.json());
 if (await workerResponds())
   throw new Error(
     "Main CaptionDoor worker must be stopped before running this recovery harness.",

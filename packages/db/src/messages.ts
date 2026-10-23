@@ -57,6 +57,7 @@ import {
   revokeSession,
   rateLimit,
   secret,
+  guestVisitFence,
 } from "./auth";
 import {
   ttl,
@@ -121,11 +122,11 @@ export async function guestMessage(
           TableName: tables.visits,
           Key: { PK: pk, SK: "STATE" },
           UpdateExpression: "SET lastMessage = :text, category = :category",
-          ConditionExpression:
-            "expiresAt > :now AND attribute_not_exists(deleted)",
+          ConditionExpression: `expiresAt > :now AND attribute_not_exists(deleted) AND ${thread.visitId ? "visitId = :visit" : "attribute_not_exists(visitId)"}`,
           ExpressionAttributeValues: {
             ":text": data.text,
             ":category": data.category,
+            ...(thread.visitId ? { ":visit": thread.visitId } : {}),
             ":now": seconds(),
           },
         },
@@ -139,13 +140,14 @@ export async function guestMessage(
         threadId: actor.threadId,
         visitId: thread.visitId,
       }),
+      ...guestVisitFence(actor, thread),
       ...authConditions(actor, "visitorText"),
     ] as any);
   } catch (error) {
     if (conditionConflict(error)) {
+      await refresh(actor, "visitorText");
       const replay = await getItem(tables.runtime, ikey.PK, ikey.SK);
       if (replay?.fingerprint === fingerprint) return replay.response;
-      await refresh(actor);
       throw new AppError(
         "CONFLICT",
         409,
@@ -183,6 +185,8 @@ export async function delivery(
     );
   const updated = { ...row, deliveryStatus: stage, deliveryUpdatedAt: now() };
   const thread = await getItem(tables.visits, pk, "STATE");
+  if (!thread || thread.deleted || thread.expiresAt <= seconds())
+    throw new AppError("EXPIRED", 403, "This conversation has expired.");
   try {
     await transact([
       put(
@@ -195,6 +199,18 @@ export async function delivery(
         threadId: actor.threadId,
         visitId: thread?.visitId,
       }),
+      {
+        ConditionCheck: {
+          TableName: tables.visits,
+          Key: { PK: pk, SK: "STATE" },
+          ConditionExpression: `expiresAt > :now AND attribute_not_exists(deleted) AND ${thread.visitId ? "visitId = :visit" : "attribute_not_exists(visitId)"}`,
+          ExpressionAttributeValues: {
+            ":now": seconds(),
+            ...(thread.visitId ? { ":visit": thread.visitId } : {}),
+          },
+        },
+      },
+      ...guestVisitFence(actor, thread),
       ...authConditions(actor, "visitorText"),
     ] as any);
   } catch (error) {

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationItem, Visit } from "@captiondoor/domain";
 export type CaptionPanelProps = {
   visit: Visit;
@@ -9,6 +9,8 @@ export type CaptionPanelProps = {
   allowFixture: boolean;
   busy: boolean;
   demoCaptions: () => Promise<void>;
+  controls?: ReactNode;
+  isHandler: boolean;
 };
 export function CaptionPanel({
   visit,
@@ -18,6 +20,8 @@ export function CaptionPanel({
   allowFixture,
   busy,
   demoCaptions,
+  controls,
+  isHandler,
 }: CaptionPanelProps) {
   const [captionSize, setCaptionSize] = useState(initialSize),
     [away, setAway] = useState(false);
@@ -36,7 +40,6 @@ export function CaptionPanel({
     <section className="caption-card" aria-labelledby="captions-title">
       <div className="section-top">
         <div>
-          <p className="eyebrow">INCOMING WORDS</p>
           <h2 id="captions-title">Captions</h2>
         </div>
         <label className="caption-size-control">
@@ -56,6 +59,52 @@ export function CaptionPanel({
       {hasCaptionAccess && visit.transcriptSource === "FIXTURE" ? (
         <div className="fixture-label">
           <span aria-hidden="true">◇</span> Demo transcript · synthetic fixture
+        </div>
+      ) : null}
+      {hasCaptionAccess && allowFixture && visit.mediaStatus === "IDLE" ? (
+        <div className="fixture-action">
+          <button
+            className="button primary"
+            disabled={!!busy}
+            onClick={() => void demoCaptions()}
+          >
+            Start Demo transcript
+          </button>
+          <p className="small muted">
+            Synthetic fixture words. Requires separate media and transcription
+            consent.
+          </p>
+        </div>
+      ) : null}
+      {controls}
+      {hasCaptionAccess && visit.status !== "CLOSED" ? (
+        <div className="caption-session-status" role="status">
+          <strong>
+            {visit.mediaStatus === "ENDED"
+              ? "Media ended."
+              : visit.mediaStatus === "UNAVAILABLE"
+                ? "Incoming audio unavailable."
+                : visit.mediaStatus === "INTERRUPTED"
+                  ? "Media interrupted."
+                  : visit.mediaStatus === "LIVE"
+                    ? visit.transcriptSource === "FIXTURE"
+                      ? "Demo session active"
+                      : "Incoming media connected"
+                    : visit.mediaStatus === "CONNECTING"
+                      ? "Connecting incoming media…"
+                      : "Captions have not started."}
+          </strong>
+          <p>
+            {visit.status === "UNCLAIMED"
+              ? "Claim this visit to start captions."
+              : !isHandler
+                ? "Only the current handler can start incoming captions."
+                : ["ENDED", "UNAVAILABLE", "INTERRUPTED"].includes(
+                      visit.mediaStatus,
+                    )
+                  ? "Handle the visit in person, then record an outcome."
+                  : "Read incoming captions, then handle the visit in person."}
+          </p>
         </div>
       ) : null}
       <div
@@ -101,14 +150,14 @@ export function CaptionPanel({
             </span>
             <h3>
               {visit.mediaStatus === "UNAVAILABLE"
-                ? "Incoming audio unavailable."
+                ? "No incoming words."
                 : "Words will appear here."}
             </h3>
             <p>
               {visit.mediaStatus === "INTERRUPTED"
                 ? "The media connection was interrupted."
                 : "Captions require available incoming audio and your explicit action."}{" "}
-              Text messages work separately.
+              Optional visitor text is available below.
             </p>
           </div>
         )}
@@ -129,23 +178,7 @@ export function CaptionPanel({
       ) : null}
       <div className="caption-footer">
         <span>Finalized means complete, not verified.</span>
-        <span>No fabricated speakers or sounds.</span>
       </div>
-      {hasCaptionAccess && allowFixture ? (
-        <div className="fixture-action">
-          <button
-            className="button secondary"
-            disabled={!!busy}
-            onClick={() => void demoCaptions()}
-          >
-            Start Demo transcript
-          </button>
-          <p className="small muted">
-            Synthetic words for this local scenario. Requires your media and
-            transcription consent in Settings.
-          </p>
-        </div>
-      ) : null}
     </section>
   );
 }

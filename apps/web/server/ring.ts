@@ -20,6 +20,8 @@ import {
   createRingOAuthAttempt,
   validateRingOAuthState,
   encryptRingCredentials,
+  decryptRingCredentials,
+  type RingMediaSession,
   type RingOAuthAttempt,
 } from "@captiondoor/integrations";
 import {
@@ -27,6 +29,11 @@ import {
   createMediaCleanupCredentials,
 } from "@captiondoor/integrations/media-cleanup";
 import { origin, hash } from "./http";
+import {
+  getOrCreateRingClientIdentity,
+  loadRingClientIdentity,
+  validateRingClientIdentity,
+} from "../../../packages/integrations/src/ring-identity";
 
 type Writes = NonNullable<TransactWriteCommandInput["TransactItems"]>;
 const householdKey = (actor: Actor) => `HOUSEHOLD#${actor.householdId}`;
@@ -117,6 +124,11 @@ export async function startRing(inputActor: Actor) {
       409,
       "Resolve or unlink the existing Ring connection before linking again.",
     );
+  const clientIdentity = await getOrCreateRingClientIdentity(
+    actor.householdId,
+    actor.userId,
+    origin,
+  );
   const redirect =
     process.env.RING_REDIRECT_URI || `${origin}/api/ring/callback`;
   const { attempt, authorizationUrl } = createRingOAuthAttempt(
@@ -133,6 +145,7 @@ export async function startRing(inputActor: Actor) {
               PK: `RING_OAUTH#${hash(attempt.state)}`,
               SK: "STATE",
               attempt,
+              clientIdentity,
               householdId: actor.householdId,
               sessionId: actor.sessionId,
               expiresAt: Math.floor(attempt.expiresAt / 1000),
@@ -198,6 +211,22 @@ export async function finishRing(req: Request, inputActor: Actor) {
       "Ring linking did not match your session.",
     );
   validateRingOAuthState(row.attempt as RingOAuthAttempt, state);
+  const clientIdentity = validateRingClientIdentity(row.clientIdentity);
+  const persistedIdentity = await loadRingClientIdentity(
+    actor.householdId,
+    actor.userId,
+    origin,
+  );
+  if (
+    clientIdentity.residentId !== actor.userId ||
+    clientIdentity.backendOrigin !== persistedIdentity.backendOrigin ||
+    clientIdentity.hardwareId !== persistedIdentity.hardwareId
+  )
+    throw new AppError(
+      "RING_OAUTH_STATE_INVALID",
+      403,
+      "Ring linking did not match its persisted resident/client identity.",
+    );
   try {
     await db.send(
       new TransactWriteCommand({
@@ -229,6 +258,7 @@ export async function finishRing(req: Request, inputActor: Actor) {
     throw error;
   }
   const client = new RingClient({
+    hardwareId: clientIdentity.hardwareId,
     mode: "live",
     clientId: process.env.RING_CLIENT_ID,
     clientSecret: process.env.RING_CLIENT_SECRET,
@@ -238,6 +268,7 @@ export async function finishRing(req: Request, inputActor: Actor) {
     (row.attempt as RingOAuthAttempt).verifier,
   );
   const linked = new RingClient({
+    hardwareId: clientIdentity.hardwareId,
     mode: "live",
     accessToken: tokens.accessToken,
     clientId: process.env.RING_CLIENT_ID,
@@ -262,6 +293,7 @@ export async function finishRing(req: Request, inputActor: Actor) {
                 status: "LINKING",
                 accountId,
                 linkMethod: "partner-oauth",
+                clientIdentity,
                 linkAttemptId: attemptId,
                 credentials: envelope,
                 updatedAt: Date.now(),
@@ -347,7 +379,10 @@ export async function finishRing(req: Request, inputActor: Actor) {
 }
 export async function listRingDevices(actor: Actor) {
   await owner(actor, true);
-  const client = await ringClientForHousehold(actor.householdId);
+  const client = await ringClientForHousehold(actor.householdId, {
+    residentId: actor.userId,
+    backendOrigin: origin,
+  });
   return (await client.listDevices()).map((d) => ({
     id: d.id,
     type: d.type,
@@ -359,7 +394,10 @@ export async function listRingDevices(actor: Actor) {
 }
 export async function selectRingDoor(inputActor: Actor, deviceId: string) {
   const { actor, boot } = await owner(inputActor, true);
-  const client = await ringClientForHousehold(actor.householdId),
+  const client = await ringClientForHousehold(actor.householdId, {
+      residentId: actor.userId,
+      backendOrigin: origin,
+    }),
     devices = await client.listDevices();
   if (!devices.some((d) => d.id === deviceId))
     throw new AppError(
@@ -500,12 +538,123 @@ export async function selectRingDoor(inputActor: Actor, deviceId: string) {
   }
   return { selected: true, doorId: door.id };
 }
+/** Persisting a cleanup envelope grants DELETE only, never authority to return SDP. */
+function mediaAdmissionChecks(
+  actor: Actor,
+  visitId: string,
+  mediaSessionId: string,
+  door: { id: string; ringDeviceId: string; ringAccountId: string },
+  hardwareId: string,
+): Writes {
+  const now = Date.now(),
+    seconds = Math.floor(now / 1000);
+  return [
+    {
+      ConditionCheck: {
+        TableName: tables.runtime,
+        Key: { PK: `SESSION#${actor.sessionId}`, SK: "SESSION" },
+        ConditionExpression:
+          "expiresAt > :sec AND attribute_not_exists(revoked) AND householdId = :household AND userId = :user AND kind = :resident",
+        ExpressionAttributeValues: {
+          ":sec": seconds,
+          ":household": actor.householdId,
+          ":user": actor.userId,
+          ":resident": "resident",
+        },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tables.config,
+        Key: { PK: householdKey(actor), SK: `MEMBER#${actor.userId}` },
+        ConditionExpression:
+          "expiresAt > :sec AND attribute_not_exists(revoked) AND grants.camera = :yes",
+        ExpressionAttributeValues: { ":sec": seconds, ":yes": true },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tables.config,
+        Key: { PK: householdKey(actor), SK: "PROFILE" },
+        ConditionExpression: "#settings.consent.ring = :yes",
+        ExpressionAttributeNames: { "#settings": "settings" },
+        ExpressionAttributeValues: { ":yes": true },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tables.visits,
+        Key: {
+          PK: `HOUSEHOLD#${actor.householdId}#VISIT#${visitId}`,
+          SK: "STATE",
+        },
+        ConditionExpression:
+          "householdId = :household AND handlerId = :user AND #status = :claimed AND mediaSessionId = :media AND mediaStatus = :connecting AND mediaSource = :ring AND mediaExpiresAt > :now AND expiresAt > :sec AND (attribute_not_exists(deleted) OR deleted = :no)",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":household": actor.householdId,
+          ":user": actor.userId,
+          ":claimed": "CLAIMED",
+          ":media": mediaSessionId,
+          ":connecting": "CONNECTING",
+          ":ring": "RING",
+          ":now": now,
+          ":sec": seconds,
+          ":no": false,
+        },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tables.config,
+        Key: { PK: householdKey(actor), SK: `DOOR#${door.id}` },
+        ConditionExpression:
+          "ringDeviceId = :device AND ringAccountId = :account",
+        ExpressionAttributeValues: {
+          ":device": door.ringDeviceId,
+          ":account": door.ringAccountId,
+        },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: tables.config,
+        Key: { PK: `RINGACCOUNT#${door.ringAccountId}`, SK: "LOOKUP" },
+        ConditionExpression:
+          "householdId = :household AND doorId = :door AND deviceId = :device AND attribute_not_exists(revoked)",
+        ExpressionAttributeValues: {
+          ":household": actor.householdId,
+          ":door": door.id,
+          ":device": door.ringDeviceId,
+        },
+      },
+    },
+    ...(process.env.RING_MODE === "live"
+      ? [
+          {
+            ConditionCheck: {
+              TableName: tables.config,
+              Key: { PK: householdKey(actor), SK: "INTEGRATION#ring" },
+              ConditionExpression:
+                "#status = :linked AND attribute_not_exists(revoked) AND attribute_exists(credentials) AND accountId = :account AND clientIdentity.hardwareId = :hardware",
+              ExpressionAttributeNames: { "#status": "status" },
+              ExpressionAttributeValues: {
+                ":linked": "LINKED",
+                ":account": door.ringAccountId,
+                ":hardware": hardwareId,
+              },
+            },
+          },
+        ]
+      : []),
+  ];
+}
 export async function startMedia(
   inputActor: Actor,
   visitId: string,
   offer: string,
 ) {
-  const actor = await service.refreshActor(inputActor, "camera");
+  let actor = await service.refreshActor(inputActor, "camera");
   const current = await service.getVisit(actor, visitId),
     boot = await service.bootstrap(actor);
   if (current.visit.handlerId !== actor.userId || !boot.settings.consent.ring)
@@ -519,13 +668,21 @@ export async function startMedia(
     householdKey(actor),
     `DOOR#${current.visit.doorId}`,
   );
-  if (!door?.ringDeviceId)
+  if (!door?.ringDeviceId || !door.ringAccountId)
     throw new AppError(
       "RING_DEVICE_REQUIRED",
       409,
       "Select an authorized Ring door first.",
     );
-  const client = await ringClientForHousehold(actor.householdId);
+  const selectedDoor = {
+    id: String(door.id),
+    ringDeviceId: String(door.ringDeviceId),
+    ringAccountId: String(door.ringAccountId),
+  };
+  const client = await ringClientForHousehold(actor.householdId, {
+    residentId: actor.userId,
+    backendOrigin: origin,
+  });
   const { visit } = await service.command(
     actor,
     visitId,
@@ -537,73 +694,150 @@ export async function startMedia(
     },
     randomUUID(),
   );
-  let session;
+  const mediaSessionId = visit.mediaSessionId!;
+  const key = {
+    PK: `MEDIA#${actor.householdId}#${mediaSessionId}`,
+    SK: "SESSION",
+  };
+  let session: RingMediaSession | undefined;
+  let cleanup:
+    Awaited<ReturnType<typeof createMediaCleanupCredentials>> | undefined;
+  const cleanupRow = () => ({
+    ...key,
+    householdId: actor.householdId,
+    visitId,
+    mediaSessionId,
+    deviceId: session!.deviceId,
+    location: session!.location,
+    expiresAt: Math.ceil(session!.expiresAt / 1000),
+    providerExpiresAt: session!.expiresAt,
+    ...cleanup!,
+  });
+  const cleanupWrites = (runAt: number): Writes => [
+    { Put: { TableName: tables.runtime, Item: cleanupRow() } },
+    {
+      Put: {
+        TableName: tables.runtime,
+        Item: makeJob(
+          "RING_MEDIA_CLOSE",
+          actor.householdId,
+          { visitId, mediaSessionId },
+          runAt,
+        ),
+      },
+    },
+  ];
   try {
-    // Conservative battery limit until a verified power-source field is selected.
+    // Resolve any required refresh while still authorized, before retaining access-only DELETE material.
+    // createWhepSession repeats the documented readiness check using the normal authorized client.
+    await client.getDeviceConfigurations(selectedDoor.ringDeviceId);
+    cleanup = await createMediaCleanupCredentials(
+      actor.householdId,
+      mediaSessionId,
+      selectedDoor.ringDeviceId,
+      Math.min(visit.mediaExpiresAt!, Date.now() + 30_000),
+      client.hardwareId,
+    );
     session = await client.createWhepSession(
-      door.ringDeviceId,
+      selectedDoor.ringDeviceId,
       offer,
       "battery",
     );
-    const key = {
-      PK: `MEDIA#${actor.householdId}#${visit.mediaSessionId}`,
-      SK: "SESSION",
-    };
-    const cleanup = await createMediaCleanupCredentials(
-      actor.householdId,
-      visit.mediaSessionId!,
-      session.deviceId,
-      session.expiresAt,
-    );
-    await db.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: tables.runtime,
-              Item: {
-                ...key,
-                householdId: actor.householdId,
-                visitId,
-                mediaSessionId: visit.mediaSessionId,
-                deviceId: session.deviceId,
-                location: session.location,
-                expiresAt: Math.ceil(session.expiresAt / 1000),
-                providerExpiresAt: session.expiresAt,
-                ...cleanup,
-              },
-            },
-          },
-          {
-            Put: {
-              TableName: tables.runtime,
-              Item: makeJob(
-                "RING_MEDIA_CLOSE",
-                actor.householdId,
-                { visitId, mediaSessionId: visit.mediaSessionId },
-                session.expiresAt,
-              ),
-            },
-          },
-        ],
-      }),
-    );
-    return {
-      mediaSessionId: visit.mediaSessionId,
-      answer: session.answer,
-      expiresAt: session.expiresAt,
-    };
+    // A delayed 201 is not permission: recheck current actor, then fence every admission dependency atomically.
+    actor = await service.refreshActor(inputActor, "camera");
+    const fresh = await service.getVisit(actor, visitId);
+    if (
+      fresh.visit.handlerId !== actor.userId ||
+      fresh.visit.mediaSessionId !== mediaSessionId ||
+      fresh.visit.mediaStatus !== "CONNECTING"
+    )
+      throw new AppError(
+        "MEDIA_STALE",
+        409,
+        "This incoming media session is no longer authorized.",
+      );
+    const expiresAt = Math.min(session.expiresAt, cleanup.cleanupExpiresAt);
+    if (expiresAt <= Date.now())
+      throw new AppError(
+        "MEDIA_EXPIRED",
+        409,
+        "Incoming media expired during negotiation. Text remains available.",
+      );
+    try {
+      await db.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            ...cleanupWrites(session.expiresAt),
+            ...mediaAdmissionChecks(
+              actor,
+              visitId,
+              mediaSessionId,
+              selectedDoor,
+              client.hardwareId,
+            ),
+          ],
+        }),
+      );
+    } catch (error) {
+      if (conditionConflict(error))
+        throw new AppError(
+          "MEDIA_STALE",
+          409,
+          "Incoming media access changed during negotiation. Text remains available.",
+        );
+      throw error;
+    }
+    return { mediaSessionId, answer: session.answer, expiresAt };
   } catch (error) {
-    if (session) {
+    let cleanupUnconfirmed = false;
+    if (session && cleanup) {
       try {
-        await client.closeWhepSession(session);
+        if (session.expiresAt > Date.now()) {
+          // The original client may now be revoked. This copy can only DELETE this allowlisted session.
+          const value = await decryptRingCredentials<Record<string, unknown>>(
+            cleanup.cleanupCredentials,
+            { householdId: actor.householdId, integrationId: "ring" },
+          );
+          if (
+            value.purpose !== "WHEP_DELETE" ||
+            value.mediaSessionId !== mediaSessionId ||
+            value.deviceId !== session.deviceId ||
+            value.hardwareId !== client.hardwareId ||
+            value.expiresAt !== cleanup.cleanupExpiresAt ||
+            cleanup.cleanupExpiresAt <= Date.now() ||
+            typeof value.accessToken !== "string"
+          )
+            throw new Error("Media cleanup authorization unavailable");
+          await new RingClient({
+            mode:
+              cleanup.cleanupSource === "PLAYGROUND" ? "playground" : "live",
+            hardwareId: client.hardwareId,
+            accessToken: value.accessToken,
+          }).closeWhepSession(session);
+        }
+        // Remove a possibly committed cleanup copy only after observed DELETE or bounded provider expiry.
+        await db.send(
+          new DeleteCommand({ TableName: tables.runtime, Key: key }),
+        );
       } catch {
-        /* A persisted cleanup job retries; Ring's documented duration is bounded. */
+        try {
+          // Revocation may have dispatched its close job before the delayed provider response existed.
+          // Persist a fresh cleanup-only job even when media admission is denied; never return its SDP.
+          const runAt =
+            cleanup.cleanupExpiresAt > Date.now()
+              ? Date.now()
+              : session.expiresAt;
+          await db.send(
+            new TransactWriteCommand({ TransactItems: cleanupWrites(runAt) }),
+          );
+        } catch {
+          cleanupUnconfirmed = true;
+        }
       }
     }
     try {
       const fresh = await service.getVisit(actor, visitId);
-      if (fresh.visit.mediaSessionId === visit.mediaSessionId)
+      if (fresh.visit.mediaSessionId === mediaSessionId)
         await service.command(
           actor,
           visitId,
@@ -617,6 +851,12 @@ export async function startMedia(
     } catch {
       /* A newer handler/revocation fences this request. */
     }
+    if (cleanupUnconfirmed)
+      throw new AppError(
+        "RING_MEDIA_CLEANUP_UNCONFIRMED",
+        503,
+        "Media was not admitted. Provider cleanup and durable retry could not be confirmed; provider expiry remains bounded.",
+      );
     throw error;
   }
 }
@@ -646,7 +886,10 @@ export async function unlinkRing(actor: Actor) {
   let externalError: unknown;
   if (process.env.RING_MODE === "live") {
     try {
-      const client = await ringClientForHousehold(actor.householdId);
+      const client = await ringClientForHousehold(actor.householdId, {
+        residentId: actor.userId,
+        backendOrigin: origin,
+      });
       await client.unlink("partner-oauth");
     } catch (error) {
       externalError = error;
@@ -696,6 +939,9 @@ export async function readyMedia(
   if (visit.mediaStatus === "LIVE") return { visit };
   return service.completeMedia(actor, visitId, {
     mediaSessionId,
-    expiresAt: record.providerExpiresAt || record.expiresAt * 1000,
+    expiresAt: Math.min(
+      record.providerExpiresAt || record.expiresAt * 1000,
+      record.cleanupExpiresAt || Infinity,
+    ),
   });
 }

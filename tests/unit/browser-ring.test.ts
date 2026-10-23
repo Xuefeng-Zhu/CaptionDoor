@@ -28,6 +28,7 @@ class FakeStream {
 class FakePeer {
   static instances: FakePeer[] = [];
   static emitEarlyVideo = true;
+  static beforeRemoteDescription: (() => Promise<void>) | undefined;
   connectionState: RTCPeerConnectionState = "new";
   iceGatheringState: RTCIceGatheringState = "complete";
   localDescription: RTCSessionDescriptionInit | null = null;
@@ -54,6 +55,7 @@ class FakePeer {
     this.localDescription = description;
   }
   async setRemoteDescription() {
+    await FakePeer.beforeRemoteDescription?.();
     if (FakePeer.emitEarlyVideo)
       this.ontrack?.({ track: this.video as unknown as MediaStreamTrack });
   }
@@ -68,6 +70,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-22T00:00:00Z"));
   FakePeer.instances = [];
   FakePeer.emitEarlyVideo = true;
+  FakePeer.beforeRemoteDescription = undefined;
   vi.stubGlobal("RTCPeerConnection", FakePeer);
   vi.stubGlobal("MediaStream", FakeStream);
 });
@@ -91,6 +94,57 @@ async function connect() {
   return { controller, states, closeSession, peer: FakePeer.instances[0] };
 }
 describe("browser Ring readiness with mocked WebRTC, no hardware", () => {
+  it.each(["abort", "expiry", "expired-audio"])(
+    "rejects %s during pending SDP application without reopening media",
+    async (failure) => {
+      let started!: () => void;
+      let finish!: () => void;
+      const entering = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      FakePeer.beforeRemoteDescription = async () => {
+        started();
+        await pending;
+      };
+      const abort = new AbortController();
+      const states: RingBrowserState[] = [];
+      const closeSession = vi.fn(async (_id: string) => undefined);
+      const onRemoteAudio = vi.fn();
+      const connecting = connectRingMedia({
+        includeAudio: true,
+        onRemoteAudio,
+        signal: abort.signal,
+        createSession: async () => ({
+          mediaSessionId: "opaque-media-fixture",
+          answer: "v=0\r\ns=mock-answer\r\n",
+          expiresAt: Date.now() + 30_000,
+        }),
+        closeSession,
+        onState: (state) => states.push(state),
+      });
+      await entering;
+      if (failure === "abort") abort.abort();
+      else {
+        vi.setSystemTime(Date.now() + 30_000);
+        FakePeer.instances[0].connectionState = "connected";
+        if (failure === "expired-audio")
+          FakePeer.instances[0].video.kind = "audio";
+      }
+      const rejected = expect(connecting).rejects.toThrow(/cancelled|expired/);
+      finish();
+      await rejected;
+      expect(closeSession).toHaveBeenCalledExactlyOnceWith(
+        "opaque-media-fixture",
+      );
+      expect(FakePeer.instances[0].close).toHaveBeenCalledTimes(1);
+      expect(states).not.toContain("LIVE");
+      expect(onRemoteAudio).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
   it("never promotes an early video track to LIVE when ICE has not connected", async () => {
     const { controller, states, closeSession, peer } = await connect();
     expect(controller.stream.getVideoTracks()).toHaveLength(1);

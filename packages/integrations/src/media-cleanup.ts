@@ -2,7 +2,16 @@ import { randomUUID } from "node:crypto";
 import { DeleteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { db, tables, getItem, conditionConflict } from "@captiondoor/db";
 import { AppError } from "@captiondoor/domain";
-import { RingClient, type RingMode, type RingTokens } from "./ring";
+import {
+  RingClient,
+  validateRingHardwareId,
+  type RingMode,
+  type RingTokens,
+} from "./ring";
+import {
+  getOrCreateRingClientIdentity,
+  validateRingClientIdentity,
+} from "./ring-identity";
 import {
   decryptRingCredentials,
   encryptRingCredentials,
@@ -11,6 +20,7 @@ import {
 
 export async function ringClientForHousehold(
   householdId: string,
+  residentClient?: { residentId: string; backendOrigin: string },
 ): Promise<RingClient> {
   const mode = (process.env.RING_MODE || "demo") as RingMode;
   if (mode === "demo")
@@ -19,13 +29,43 @@ export async function ringClientForHousehold(
       409,
       "Local simulation has no Ring media.",
     );
-  if (mode === "playground")
+  if (mode === "playground") {
+    if (!residentClient)
+      throw new AppError(
+        "RING_CLIENT_IDENTITY_REQUIRED",
+        503,
+        "A trusted resident/client scope is required for Playground requests.",
+      );
+    const identity = await getOrCreateRingClientIdentity(
+      householdId,
+      residentClient.residentId,
+      residentClient.backendOrigin,
+    );
     return new RingClient({
       mode,
+      hardwareId: identity.hardwareId,
       accessToken: process.env.RING_PLAYGROUND_TOKEN,
     });
+  }
   const key = { PK: `HOUSEHOLD#${householdId}`, SK: "INTEGRATION#ring" };
+  const integration = await getItem(tables.config, key.PK, key.SK);
+  if (
+    !integration?.credentials ||
+    integration.revoked ||
+    integration.status !== "LINKED"
+  )
+    throw new AppError(
+      "RING_LINK_REQUIRED",
+      409,
+      "Connect Ring before starting incoming media.",
+    );
+  const identity = validateRingClientIdentity(integration.clientIdentity);
+  const identityMatches = (row: Record<string, any>) =>
+    row.clientIdentity?.hardwareId === identity.hardwareId &&
+    row.clientIdentity?.residentId === identity.residentId &&
+    row.clientIdentity?.backendOrigin === identity.backendOrigin;
   const client = new RingClient({
+    hardwareId: identity.hardwareId,
     mode,
     clientId: process.env.RING_CLIENT_ID,
     clientSecret: process.env.RING_CLIENT_SECRET,
@@ -37,6 +77,12 @@ export async function ringClientForHousehold(
           409,
           "Connect Ring before starting incoming media.",
         );
+      if (!identityMatches(row))
+        throw new AppError(
+          "RING_ACCESS_CHANGED",
+          409,
+          "Ring client identity changed during this request.",
+        );
       const tokens = await decryptRingCredentials<
         RingTokens & Record<string, unknown>
       >(row.credentials as CredentialEnvelope, {
@@ -47,6 +93,7 @@ export async function ringClientForHousehold(
       if (
         !fresh?.credentials ||
         JSON.stringify(fresh.credentials) !== JSON.stringify(row.credentials) ||
+        !identityMatches(fresh) ||
         fresh.revoked ||
         fresh.status !== "LINKED"
       )
@@ -66,13 +113,14 @@ export async function ringClientForHousehold(
             UpdateExpression:
               "SET refreshUntil = :until, refreshOwner = :owner",
             ConditionExpression:
-              "#status = :linked AND attribute_not_exists(revoked) AND credentials = :credentials AND (attribute_not_exists(refreshUntil) OR refreshUntil < :now)",
+              "#status = :linked AND attribute_not_exists(revoked) AND clientIdentity = :identity AND credentials = :credentials AND (attribute_not_exists(refreshUntil) OR refreshUntil < :now)",
             ExpressionAttributeNames: { "#status": "status" },
             ExpressionAttributeValues: {
               ":until": now + 15_000,
               ":owner": refreshOwner,
               ":linked": "LINKED",
               ":credentials": row.credentials,
+              ":identity": identity,
               ":now": now,
             },
           }),
@@ -89,6 +137,7 @@ export async function ringClientForHousehold(
       let refreshed: RingTokens | undefined;
       try {
         refreshed = await new RingClient({
+          hardwareId: identity.hardwareId,
           mode: "live",
           clientId: process.env.RING_CLIENT_ID,
           clientSecret: process.env.RING_CLIENT_SECRET,
@@ -104,7 +153,7 @@ export async function ringClientForHousehold(
             UpdateExpression:
               "SET credentials = :credentials, updatedAt = :now REMOVE refreshUntil, refreshOwner",
             ConditionExpression:
-              "#status = :linked AND attribute_not_exists(revoked) AND refreshOwner = :owner AND refreshUntil > :now AND credentials = :before",
+              "#status = :linked AND attribute_not_exists(revoked) AND refreshOwner = :owner AND refreshUntil > :now AND credentials = :before AND clientIdentity = :identity",
             ExpressionAttributeNames: { "#status": "status" },
             ExpressionAttributeValues: {
               ":credentials": envelope,
@@ -112,6 +161,7 @@ export async function ringClientForHousehold(
               ":linked": "LINKED",
               ":owner": refreshOwner,
               ":before": row.credentials,
+              ":identity": identity,
             },
           }),
         );
@@ -126,13 +176,14 @@ export async function ringClientForHousehold(
                 Key: key,
                 UpdateExpression: "SET #status = :relink, updatedAt = :now",
                 ConditionExpression:
-                  "#status = :linked AND attribute_not_exists(revoked) AND refreshOwner = :owner",
+                  "#status = :linked AND attribute_not_exists(revoked) AND refreshOwner = :owner AND clientIdentity = :identity",
                 ExpressionAttributeNames: { "#status": "status" },
                 ExpressionAttributeValues: {
                   ":relink": "RELINK_REQUIRED",
                   ":linked": "LINKED",
                   ":now": Date.now(),
                   ":owner": refreshOwner,
+                  ":identity": identity,
                 },
               }),
             );
@@ -169,6 +220,7 @@ export async function ringClientForHousehold(
 type MediaCleanupCredential = {
   purpose: "WHEP_DELETE";
   accessToken: string;
+  hardwareId: string;
   expiresAt: number;
   mediaSessionId: string;
   deviceId: string;
@@ -179,11 +231,13 @@ export async function createMediaCleanupCredentials(
   mediaSessionId: string,
   deviceId: string,
   providerExpiresAt: number,
+  hardwareId: string,
 ): Promise<{
   cleanupCredentials: CredentialEnvelope;
   cleanupExpiresAt: number;
   cleanupSource: "PLAYGROUND" | "LIVE";
 }> {
+  validateRingHardwareId(hardwareId);
   const now = Date.now();
   if (
     !mediaSessionId ||
@@ -218,6 +272,15 @@ export async function createMediaCleanupCredentials(
         409,
         "Ring access changed before media cleanup could be secured.",
       );
+    if (
+      validateRingClientIdentity(integration.clientIdentity).hardwareId !==
+      hardwareId
+    )
+      throw new AppError(
+        "RING_ACCESS_CHANGED",
+        409,
+        "Ring client identity changed before cleanup authorization.",
+      );
     const tokens = await decryptRingCredentials<
       RingTokens & Record<string, unknown>
     >(integration.credentials as CredentialEnvelope, {
@@ -250,6 +313,7 @@ export async function createMediaCleanupCredentials(
   );
   const value: MediaCleanupCredential = {
     purpose: "WHEP_DELETE",
+    hardwareId,
     accessToken,
     expiresAt: cleanupExpiresAt,
     mediaSessionId,
@@ -317,6 +381,7 @@ export async function closePersistedMedia(
     const client = new RingClient({
       mode: row.cleanupSource === "PLAYGROUND" ? "playground" : "live",
       accessToken: credentials.accessToken,
+      hardwareId: credentials.hardwareId,
     });
     await client.closeWhepSession({
       deviceId: row.deviceId,

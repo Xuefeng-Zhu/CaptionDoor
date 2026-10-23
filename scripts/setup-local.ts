@@ -20,6 +20,7 @@ import {
 import {
   client,
   tables,
+  databaseConfig,
   db,
   getItem,
   putItem,
@@ -33,6 +34,8 @@ const endpoint = process.env.DYNAMODB_ENDPOINT || "http://127.0.0.1:8410";
 export function assertLocalReset() {
   const url = new URL(endpoint);
   if (
+    databaseConfig.mode !== "local" ||
+    databaseConfig.environment !== "local" ||
     !["127.0.0.1", "localhost"].includes(url.hostname) ||
     url.port !== "8410" ||
     process.env.NODE_ENV === "production" ||
@@ -283,6 +286,14 @@ export async function setupLocal(reset = false) {
       : `${envText}\n${line}\n`;
     writeFileSync(env, envText, { mode: 0o600 });
   }
+  for (const [key, value] of [
+    ["CAPTIONDOOR_DB_MODE", "local"],
+    ["CAPTIONDOOR_ENV", "local"],
+  ]) {
+    if (!envText.split("\n").some((line) => line.startsWith(`${key}=`)))
+      envText += `\n${key}=${value}\n`;
+  }
+  writeFileSync(env, envText, { mode: 0o600 });
   chmodSync(env, 0o600);
   console.info(
     "CaptionDoor local setup ready. Existing records preserved unless --reset was explicitly requested.",

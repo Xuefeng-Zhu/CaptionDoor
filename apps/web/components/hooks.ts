@@ -123,8 +123,9 @@ export function useLive({
             }
           } catch {}
         };
-        active.onclose = () => {
+        active.onclose = (event) => {
           if (!closed && current === generation) {
+            if (event.code === 1008) changeRef.current();
             setState(navigator.onLine ? "reconnecting" : "offline");
             timer = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 15000));
           }

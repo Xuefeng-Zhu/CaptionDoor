@@ -77,6 +77,7 @@ async function prepareSharedVisit(
     await expect(page.locator(".caption-line p")).toHaveText(
       "Do not leave it.",
     );
+    await page.locator(".optional-visitor-text > summary").click();
     await expect(page.getByText(privateText, { exact: true })).toBeVisible();
     await page.locator(".events-panel summary").click();
     await expect(page.locator(".events-panel li").first()).toBeVisible();
@@ -119,6 +120,7 @@ async function expectHandlerRetainsContent(
     await expect(handlerPage.locator(".caption-line p")).toHaveText(
       "Do not leave it.",
     );
+    await handlerPage.locator(".optional-visitor-text > summary").click();
     await expect(
       handlerPage.getByText(privateText, { exact: true }),
     ).toBeVisible();

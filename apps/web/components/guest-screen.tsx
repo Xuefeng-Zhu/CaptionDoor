@@ -99,14 +99,17 @@ export function GuestScreen({ publicDoorId }: { publicDoorId: string }) {
     [notice, setNotice] = useState(""),
     [olderCursor, setOlderCursor] = useState<string | undefined>();
   const expanded = useRef(false);
+  const loadRequest = useRef(0);
   const pendingSend = useRef<{ payload: string; key: string } | null>(null);
   const initial = useRef<Promise<GuestView> | null>(null);
   const load = useCallback(
     async (cursor?: string) => {
+      const request = ++loadRequest.current;
       try {
         const d = await api<GuestView>(
           `/guest?publicDoorId=${encodeURIComponent(publicDoorId)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
         );
+        if (request !== loadRequest.current) return;
         if (cursor) expanded.current = true;
         if (cursor || !expanded.current) setOlderCursor(d.nextCursor);
         setView((previous) => ({
@@ -120,8 +123,12 @@ export function GuestScreen({ publicDoorId }: { publicDoorId: string }) {
         }));
         setError("");
       } catch (e) {
-        if (e instanceof HttpError && [401, 403].includes(e.status))
+        if (request !== loadRequest.current) return;
+        if (e instanceof HttpError && [401, 403].includes(e.status)) {
           setView(null);
+          setOlderCursor(undefined);
+          setNotice("");
+        }
         setError(errorText(e));
       }
     },

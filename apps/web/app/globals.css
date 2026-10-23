@@ -2300,9 +2300,6 @@ details[open] > summary {
     padding: 20px;
     max-height: 420px;
   }
-  .caption-line p {
-    font-size: 28px !important;
-  }
   .messages-card {
     padding: 22px 20px;
   }
@@ -2932,9 +2929,6 @@ details[open] > summary {
   }
   .caption-empty p {
     font-size: 14px;
-  }
-  .caption-line p {
-    font-size: inherit !important;
   }
   .caption-footer {
     padding: 12px 22px;
@@ -3572,9 +3566,6 @@ details[open] > summary {
   .journey-list {
     font-size: 17px;
   }
-  .caption-line p {
-    font-size: inherit !important;
-  }
 }
 @media (max-width: 680px) {
   .onboarding-intro h1 {
@@ -3745,5 +3736,172 @@ details[open] > summary {
   }
   .visit-actions > .responsibility-card {
     display: none;
+  }
+}
+
+/* Caption-first visit polish, 2026-10-22. */
+.page-heading.home-heading {
+  margin: 32px 0;
+  padding: 0;
+  align-items: baseline;
+}
+.home-heading h1 {
+  font-size: clamp(38px, 5vw, 56px);
+  line-height: 1.1;
+}
+.home-heading .heading-aside {
+  max-width: 360px;
+  font-size: 18px;
+}
+.home-grid {
+  grid-template-columns: 1.6fr 1fr;
+}
+.home-grid .current-card {
+  min-height: 320px;
+}
+.home-grid .door-overview {
+  padding: 28px;
+}
+.home-grid .door-illustration {
+  height: 110px;
+}
+.caption-session-status {
+  padding: 18px 28px;
+  background: #eef1e7;
+  border-block: 1px solid var(--line);
+}
+.caption-session-status strong {
+  font-size: 19px;
+}
+.caption-session-status p {
+  margin: 5px 0 0;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.caption-card .fixture-action {
+  padding: 20px 28px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+}
+.caption-card .fixture-action p {
+  margin: 0;
+  font-size: 16px;
+  max-width: 390px;
+}
+.incoming-caption-controls {
+  padding: 20px 28px;
+}
+.incoming-caption-controls .button-row {
+  margin: 16px 0;
+}
+.optional-visitor-text {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper, #fffefa);
+}
+.optional-visitor-text > summary {
+  min-height: 56px;
+  padding: 18px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.optional-visitor-body {
+  padding: 0 18px 20px;
+}
+.optional-visitor-body .messages-card,
+.optional-visitor-body .reply-card,
+.optional-visitor-body .association-card {
+  padding: 20px 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.optional-visitor-body .section-top {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.optional-visitor-body h2 {
+  font-size: 26px;
+}
+.optional-visitor-body .candidate-thread {
+  margin-top: 18px;
+}
+.optional-text-setup {
+  margin-top: 18px;
+}
+.optional-text-setup > summary {
+  min-height: 48px;
+  cursor: pointer;
+  padding: 12px 0;
+}
+@media (max-width: 850px) {
+  .home-grid {
+    grid-template-columns: 1fr;
+  }
+  .home-grid .door-overview {
+    display: block;
+  }
+  .home-grid .door-illustration {
+    display: none;
+  }
+}
+@media (max-width: 680px) {
+  .page-heading.home-heading {
+    display: block;
+    margin: 24px 0;
+  }
+  .home-heading .heading-aside {
+    margin-top: 12px;
+  }
+  .home-grid .current-card {
+    min-height: 0;
+    padding: 24px;
+  }
+  .home-grid .door-overview {
+    padding: 24px;
+  }
+  .caption-session-status,
+  .incoming-caption-controls {
+    padding: 18px;
+  }
+  .caption-card .fixture-action {
+    display: block;
+    padding: 18px;
+  }
+  .caption-card .fixture-action .button {
+    width: 100%;
+  }
+  .caption-card .fixture-action p {
+    margin-top: 12px;
+  }
+  .caption-scroll {
+    min-height: 180px;
+  }
+  .caption-empty {
+    min-height: 150px;
+  }
+  .optional-visitor-body {
+    padding-inline: 16px;
+  }
+}
+
+.caption-card .fixture-label {
+  font-size: 14px;
+}
+.caption-card .caption-meta {
+  font-size: 14px;
+}
+@media (max-width: 680px) {
+  .mobile-responsibility {
+    padding: 16px 18px;
+  }
+  .mobile-responsibility > p {
+    margin: 0;
+    font-size: 16px;
+  }
+  .mobile-responsibility .button {
+    margin-top: 14px;
   }
 }

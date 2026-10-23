@@ -19,6 +19,11 @@ export default defineConfig({
     ],
   },
   test: {
+    env: {
+      CAPTIONDOOR_DB_MODE: "local",
+      CAPTIONDOOR_ENV: "local",
+      DYNAMODB_ENDPOINT: "http://127.0.0.1:8410",
+    },
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
     testTimeout: 30_000,
     hookTimeout: 60_000,

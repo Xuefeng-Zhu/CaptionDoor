@@ -17,6 +17,7 @@ import {
   id,
   householdPK,
   threadPK,
+  visitPK,
   put,
   transact,
   jobPut,
@@ -43,6 +44,49 @@ export async function member(
     throw new AppError("FORBIDDEN", 403, "Household access is unavailable.");
   return row as Row & Member;
 }
+/** A thread cannot outlive its associated visit's access policy, even while physical deletion is pending. */
+export async function threadVisitAccessible(
+  householdId: string,
+  thread: Row,
+): Promise<boolean> {
+  if (!thread.visitId) return true;
+  if (typeof thread.visitId !== "string") return false;
+  const visit = await getItem(
+    tables.visits,
+    visitPK(householdId, thread.visitId),
+    "STATE",
+  );
+  return Boolean(
+    visit &&
+    visit.householdId === householdId &&
+    visit.id === thread.visitId &&
+    !visit.deleted &&
+    visit.expiresAt > seconds(),
+  );
+}
+/** The thread update carries its own association fence; this separate item protects the parent visit atomically. */
+export function guestVisitFence(actor: Actor, thread: Row) {
+  return thread.visitId
+    ? [
+        {
+          ConditionCheck: {
+            TableName: tables.visits,
+            Key: {
+              PK: visitPK(actor.householdId, thread.visitId),
+              SK: "STATE",
+            },
+            ConditionExpression:
+              "attribute_exists(PK) AND householdId = :household AND expiresAt > :now AND (attribute_not_exists(deleted) OR deleted = :no)",
+            ExpressionAttributeValues: {
+              ":household": actor.householdId,
+              ":now": seconds(),
+              ":no": false,
+            },
+          },
+        },
+      ]
+    : [];
+}
 export async function sessionFromId(sessionId: string): Promise<Actor> {
   const row = await getItem(tables.runtime, `SESSION#${sessionId}`, "SESSION");
   if (!row || row.revoked || row.expiresAt <= seconds())
@@ -56,7 +100,12 @@ export async function sessionFromId(sessionId: string): Promise<Actor> {
       threadPK(row.householdId, row.threadId),
       "STATE",
     );
-    if (!thread || thread.expiresAt <= seconds() || thread.deleted)
+    if (
+      !thread ||
+      thread.expiresAt <= seconds() ||
+      thread.deleted ||
+      !(await threadVisitAccessible(row.householdId, thread))
+    )
       throw new AppError(
         "EXPIRED",
         403,

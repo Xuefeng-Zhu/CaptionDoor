@@ -1,13 +1,27 @@
+import { prepareCapture } from "./prepare-capture";
+import { withPendingCapture } from "./pending-capture";
+import {
+  issueRootSmokePermit,
+  rootSmokeReceipt,
+} from "../../../packages/integrations/src/audio/root-smoke-permit";
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { z } from "zod";
-import { service, getItem, tables, visitPK, type Job } from "@captiondoor/db";
+import {
+  service,
+  getItem,
+  tables,
+  databaseConfig,
+  visitPK,
+  type Job,
+} from "@captiondoor/db";
 import {
   AppError,
   validateModes,
+  assertProviderSmokeEnvironment,
   type Actor,
   type ConversationItem,
   type Visit,
@@ -28,14 +42,18 @@ import {
   SQSClient,
 } from "@aws-sdk/client-sqs";
 
-for (const file of [
-  resolve(process.cwd(), ".env"),
-  resolve(process.cwd(), "../../.env"),
-])
-  if (existsSync(file)) {
-    process.loadEnvFile(file);
-    break;
-  }
+if (
+  process.env.NODE_ENV !== "production" &&
+  process.env.CAPTIONDOOR_DB_MODE !== "aws"
+)
+  for (const file of [
+    resolve(process.cwd(), ".env"),
+    resolve(process.cwd(), "../../.env"),
+  ])
+    if (existsSync(file)) {
+      process.loadEnvFile(file);
+      break;
+    }
 validateModes(process.env);
 const port = Number(process.env.WORKER_PORT || 3411);
 const host = process.env.WORKER_HOST || "127.0.0.1";
@@ -49,6 +67,21 @@ if (["localhost", "127.0.0.1"].includes(new URL(appOrigin).hostname))
     "https://localhost:3443",
   ])
     allowedOrigins.add(origin);
+function providerSmokeEnabled() {
+  try {
+    const { tablePrefix } = assertProviderSmokeEnvironment(process.env);
+    return (
+      databaseConfig.mode === "local" &&
+      databaseConfig.environment === "local" &&
+      appOrigin === "http://127.0.0.1:3410" &&
+      tables.config === `${tablePrefix}Config` &&
+      tables.visits === `${tablePrefix}Visits` &&
+      tables.runtime === `${tablePrefix}Runtime`
+    );
+  } catch {
+    return false;
+  }
+}
 const workerId = `worker-${randomUUID()}`;
 const command = z.discriminatedUnion("type", [
   z.object({
@@ -76,6 +109,7 @@ type Capture = {
   actor: Actor;
   sequence: PcmSequence;
   stream: AwsPcmStream;
+  ready: boolean;
 };
 type Connection = {
   ws: WebSocket;
@@ -228,7 +262,7 @@ async function handleMessage(
 ) {
   if (isBinary) {
     const capture = connection.capture;
-    if (!capture)
+    if (!capture?.ready)
       throw new AppError("NO_CAPTURE", 403, "Audio capture is not authorized.");
     const actor = await actorFor(connection, "resident");
     const visit = await service.authorizeCapture(actor, capture.visitId, {
@@ -350,50 +384,105 @@ async function handleMessage(
       );
     connection.kind = "resident";
     connection.visitId = message.visitId;
-    const stream = new AwsPcmStream(
-      message.mediaSessionId,
-      async (caption) => {
-        const fresh = await actorFor(connection, "resident");
-        await service.authorizeCapture(fresh, message.visitId, {
-          leaseId: message.leaseId,
-          mediaSessionId: message.mediaSessionId,
-        });
-        const saved = await service.persistCaption(
-          fresh,
-          message.visitId,
-          caption,
-          message.leaseId,
-        );
-        if (caption.isPartial || saved)
-          await emitCaption(
-            fresh.householdId,
-            message.visitId,
-            caption,
-            visit.expiresAt,
+    await withPendingCapture(
+      `${actor.householdId}:${message.visitId}`,
+      async () => {
+        const rootPermit =
+          process.env.CAPTIONDOOR_ROOT_SMOKE === "1"
+            ? issueRootSmokePermit(
+                await service.reserveRootSmokeAttempt(actor, message.visitId, {
+                  leaseId: message.leaseId,
+                  mediaSessionId: message.mediaSessionId,
+                }),
+              )
+            : undefined;
+        if (connection.ws.readyState !== WebSocket.OPEN)
+          throw new AppError(
+            "CONNECTION_ENDED",
+            409,
+            "Caption connection ended.",
           );
-      },
-      (category) => {
-        send(connection, {
-          type: "media-status",
-          status: "INTERRUPTED",
-          message: "AWS transcription interrupted. Text remains available.",
-          category,
-        });
-        void stopCapture(connection, category);
+        const stream = new AwsPcmStream(
+          message.mediaSessionId,
+          async (caption) => {
+            const fresh = await actorFor(connection, "resident");
+            await service.authorizeCapture(fresh, message.visitId, {
+              leaseId: message.leaseId,
+              mediaSessionId: message.mediaSessionId,
+            });
+            const saved = await service.persistCaption(
+              fresh,
+              message.visitId,
+              caption,
+              message.leaseId,
+            );
+            if (caption.isPartial || saved)
+              await emitCaption(
+                fresh.householdId,
+                message.visitId,
+                caption,
+                visit.expiresAt,
+              );
+          },
+          (category) => {
+            send(connection, {
+              type: "media-status",
+              status: "INTERRUPTED",
+              message: "AWS transcription interrupted. Text remains available.",
+              category,
+            });
+            void stopCapture(connection, category);
+          },
+          rootPermit,
+        );
+        const capture: Capture = {
+          ...message,
+          actor,
+          sequence: new PcmSequence(),
+          stream,
+          ready: false,
+        };
+        connection.capture = capture;
+        try {
+          await prepareCapture({
+            stream,
+            current: () =>
+              connection.capture === capture &&
+              connection.ws.readyState === WebSocket.OPEN,
+            authorize: async () =>
+              service.authorizeCapture(
+                await actorFor(connection, "resident"),
+                message.visitId,
+                {
+                  leaseId: message.leaseId,
+                  mediaSessionId: message.mediaSessionId,
+                },
+              ),
+            ready: () => {
+              capture.ready = true;
+              send(connection, {
+                type: "capture-ready",
+                visitId: message.visitId,
+                mediaSessionId: message.mediaSessionId,
+                ...(rootPermit
+                  ? { rootSmoke: rootSmokeReceipt(rootPermit) }
+                  : {}),
+              });
+            },
+          });
+        } catch (error) {
+          if (connection.capture === capture)
+            await stopCapture(
+              connection,
+              error instanceof AppError
+                ? error.code
+                : "TRANSCRIBE_PREPARATION_FAILED",
+            );
+          throw error;
+        }
+        void stream.run();
       },
     );
-    connection.capture = {
-      ...message,
-      actor,
-      sequence: new PcmSequence(),
-      stream,
-    };
-    send(connection, {
-      type: "capture-ready",
-      visitId: message.visitId,
-      mediaSessionId: message.mediaSessionId,
-    });
-    void stream.run();
   }
 }
 const server = createServer(async (request, response) => {
@@ -406,9 +495,18 @@ const server = createServer(async (request, response) => {
         JSON.stringify({
           status: "ok",
           worker: "single",
+          providerSmoke: providerSmokeEnabled(),
+          providerSmokeTablePrefix: providerSmokeEnabled()
+            ? tables.config.slice(0, -6)
+            : undefined,
+          databaseMode: databaseConfig.mode,
+          environment: databaseConfig.environment,
+          pollIntervalMs: databaseConfig.pollIntervalMs,
           transport: process.env.SQS_QUEUE_URL
             ? "sqs+due-recovery"
-            : "local-due-poller",
+            : databaseConfig.mode === "local"
+              ? "local-due-poller"
+              : "aws-due-poller",
           transcribe: process.env.TRANSCRIBE_MODE || "fixture",
         }),
       );
@@ -684,7 +782,7 @@ async function pollDue() {
 }
 const poll = setInterval(() => {
   void pollDue();
-}, 500);
+}, databaseConfig.pollIntervalMs);
 void pollDue();
 const sqs = process.env.SQS_QUEUE_URL
   ? new SQSClient({ region: process.env.AWS_REGION || "us-east-1" })

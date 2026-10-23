@@ -39,6 +39,7 @@ test("rendered resident and visitor journey requires explicit claim, association
     expect(
       (await view(alex, visit.id)).items.filter((i) => i.kind === "message"),
     ).toHaveLength(0);
+    await residentPage.locator(".optional-visitor-text > summary").click();
     await expect(
       residentPage.getByText("No visitor page is associated yet.", {
         exact: true,

@@ -96,7 +96,7 @@ export function Shell({
       </main>
       <footer className="site-footer">
         <span>Understand your doorstep without relying on sound.</span>
-        <span>Text is always your choice.</span>
+        <span>You choose when to connect.</span>
       </footer>
     </div>
   );

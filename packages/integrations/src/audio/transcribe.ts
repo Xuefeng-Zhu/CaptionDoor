@@ -1,9 +1,15 @@
 import {
   StartStreamTranscriptionCommand,
-  TranscribeStreamingClient,
   type AudioStream,
   type Result,
 } from "@aws-sdk/client-transcribe-streaming";
+import { AppError } from "@captiondoor/domain";
+import { createVerifiedTranscribeClient } from "./aws-identity";
+import {
+  armRootSmokeDeadline,
+  type RootSmokePermit,
+} from "./root-smoke-permit";
+
 export type StreamingCaption = {
   mediaSessionId: string;
   resultId: string;
@@ -85,40 +91,84 @@ export class AudioBufferQueue implements AsyncIterable<Uint8Array> {
 export class AwsPcmStream {
   private readonly queue = new AudioBufferQueue(5);
   private readonly abort = new AbortController();
-  private readonly client: TranscribeStreamingClient;
+  private aws: ReturnType<typeof createVerifiedTranscribeClient> | undefined;
+  private preparing: Promise<void> | undefined;
+  private running = false;
   private stopped = false;
+  private cancelRootDeadline: (() => void) | undefined;
   constructor(
     private mediaSessionId: string,
     private onCaption: (caption: StreamingCaption) => Promise<void>,
     private onFailure: (category: string) => void,
+    private readonly rootPermit?: RootSmokePermit,
   ) {
-    this.client = new TranscribeStreamingClient({
-      region: process.env.AWS_REGION || "us-east-1",
-      maxAttempts: 1,
-    });
+    if (rootPermit)
+      this.cancelRootDeadline = armRootSmokeDeadline(rootPermit, () => {
+        if (this.stopped) return;
+        this.stop();
+        this.onFailure("ROOT_SMOKE_DURATION_LIMIT");
+      });
+  }
+  private rootDeadlineReached() {
+    if (!this.rootPermit || Date.now() < this.rootPermit.expiresAt)
+      return false;
+    if (!this.stopped) {
+      this.stop();
+      this.onFailure("ROOT_SMOKE_DURATION_LIMIT");
+    }
+    return true;
   }
   push(pcm: Uint8Array) {
+    if (this.rootDeadlineReached()) return false;
     return this.queue.push(pcm);
   }
+  /** Complete account verification before the worker permits the browser to send PCM. */
+  prepare(): Promise<void> {
+    if (!this.preparing)
+      this.preparing = (async () => {
+        if (this.stopped)
+          throw new AppError(
+            "TRANSCRIBE_STREAM_ENDED",
+            409,
+            "Caption stream ended.",
+          );
+        this.aws = createVerifiedTranscribeClient(
+          this.abort.signal,
+          process.env,
+          this.rootPermit,
+        );
+        await this.aws.verify();
+        if (this.stopped)
+          throw new AppError(
+            "TRANSCRIBE_STREAM_ENDED",
+            409,
+            "Caption stream ended.",
+          );
+      })();
+    return this.preparing;
+  }
   async run() {
+    if (this.running || this.stopped) return;
+    this.running = true;
     try {
+      await this.prepare();
+      if (this.stopped || this.rootDeadlineReached()) return;
       const chunks = this.queue;
       async function* audio(): AsyncGenerator<AudioStream> {
         for await (const chunk of chunks)
           yield { AudioEvent: { AudioChunk: chunk } };
       }
-      const output = await this.client.send(
+      const output = await this.aws!.client.send(
         new StartStreamTranscriptionCommand({
           LanguageCode: "en-US",
           MediaEncoding: "pcm",
           MediaSampleRateHertz: 16000,
-          NumberOfChannels: 1,
           AudioStream: audio(),
         }),
         { abortSignal: this.abort.signal },
       );
       for await (const event of output.TranscriptResultStream || []) {
-        if (this.stopped) break;
+        if (this.stopped || this.rootDeadlineReached()) break;
         for (const result of event.TranscriptEvent?.Transcript?.Results || []) {
           const caption = streamingCaptionFromResult(
             this.mediaSessionId,
@@ -130,7 +180,11 @@ export class AwsPcmStream {
     } catch (error) {
       if (!this.stopped)
         this.onFailure(
-          error instanceof Error ? error.name : "TranscribeFailure",
+          error instanceof AppError
+            ? error.code
+            : error instanceof Error
+              ? error.name
+              : "TranscribeFailure",
         );
     } finally {
       this.stop();
@@ -139,8 +193,9 @@ export class AwsPcmStream {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.cancelRootDeadline?.();
     this.queue.close();
     this.abort.abort();
-    this.client.destroy();
+    this.aws?.destroy();
   }
 }

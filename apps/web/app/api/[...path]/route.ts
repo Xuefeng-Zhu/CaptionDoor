@@ -6,7 +6,14 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import QRCode from "qrcode";
 import { z } from "zod";
-import { service, db, tables, getItem, queryPK } from "@captiondoor/db";
+import {
+  service,
+  db,
+  tables,
+  databaseConfig,
+  getItem,
+  queryPK,
+} from "@captiondoor/db";
 import { AppError, type Actor, assertFresh } from "@captiondoor/domain";
 import {
   commandSchema,
@@ -45,6 +52,11 @@ import {
   unlinkRing,
   selectRingDoor,
 } from "../../../server/ring";
+import {
+  assertProviderSmokeRuntime,
+  pressProviderSmoke,
+  providerSmokeRuntimeStatus,
+} from "../../../server/provider-smoke";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ path: string[] }> };
@@ -58,9 +70,12 @@ async function run(req: Request, context: Context) {
     return json({
       status: "ok",
       database: "DynamoDB",
+      databaseMode: databaseConfig.mode,
+      environment: databaseConfig.environment,
       ringMode: process.env.RING_MODE || "demo",
       transcribeMode: process.env.TRANSCRIBE_MODE || "fixture",
       authMode: process.env.AUTH_MODE || "demo",
+      ...providerSmokeRuntimeStatus(),
     });
   }
   if (method === "POST" && route === "auth/demo") {
@@ -314,8 +329,21 @@ async function run(req: Request, context: Context) {
       },
     );
   }
+  if (method === "GET" && route === "provider-smoke/budget") {
+    assertProviderSmokeRuntime();
+    return json(await service.getRootSmokeBudget(await actor(req)));
+  }
+  if (method === "POST" && route === "provider-smoke/press")
+    assertProviderSmokeRuntime();
   const who = await actor(req);
   if (method !== "GET") csrf(req, who);
+  if (method === "POST" && route === "provider-smoke/press") {
+    const input = z
+      .object({ eventId: z.uuid() })
+      .strict()
+      .parse(await body(req));
+    return json(await pressProviderSmoke(who, input.eventId, idempotency(req)));
+  }
   if (method === "GET" && route === "me")
     return json(await service.bootstrap(who));
   if (method === "GET" && route === "ring/status") {

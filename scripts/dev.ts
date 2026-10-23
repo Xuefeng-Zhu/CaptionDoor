@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-if (existsSync(".env")) process.loadEnvFile(".env");
+if (process.env.CAPTIONDOOR_DB_MODE !== "aws" && existsSync(".env"))
+  process.loadEnvFile(".env");
 Object.assign(process.env, {
   NODE_ENV: "development",
   NEXT_TELEMETRY_DISABLED: "1",

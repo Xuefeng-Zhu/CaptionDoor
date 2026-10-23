@@ -1,4 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import { resolveDatabaseConfig, databaseClientOptions } from "./config";
+import { installAwsIdentityGuard } from "./aws-identity";
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -15,7 +18,10 @@ import { resolve } from "node:path";
 import { AppError, validateModes } from "@captiondoor/domain";
 // Private local files are development-only; production receives process environment.
 // Do not let the production file tracer copy a private .env into standalone output.
-if (process.env.NODE_ENV !== "production") {
+if (
+  process.env.NODE_ENV !== "production" &&
+  process.env.CAPTIONDOOR_DB_MODE !== "aws"
+) {
   for (const file of [
     resolve(process.cwd(), ".env"),
     resolve(process.cwd(), "../../.env"),
@@ -31,33 +37,23 @@ if (process.env.NODE_ENV !== "production") {
   }
 }
 validateModes(process.env);
-const endpoint =
-  process.env.DYNAMODB_ENDPOINT ||
-  (process.env.NODE_ENV === "production" ? undefined : "http://127.0.0.1:8410");
-if (
-  endpoint &&
-  !["127.0.0.1", "localhost", "dynamodb"].includes(new URL(endpoint).hostname)
-)
-  throw new Error(
-    "DYNAMODB_ENDPOINT must be an explicitly isolated local endpoint.",
+export const databaseConfig = resolveDatabaseConfig(process.env);
+export const tables = databaseConfig.tables;
+export const client = new DynamoDBClient(databaseClientOptions(databaseConfig));
+if (databaseConfig.mode === "aws") {
+  const identity = new STSClient({
+    region: databaseConfig.region,
+    credentials: client.config.credentials,
+    maxAttempts: 1,
+    ignoreConfiguredEndpointUrls: true,
+  });
+  // DocumentClient inherits this guard. STS uses the same normal credential provider.
+  installAwsIdentityGuard(client, databaseConfig.accountId!, () =>
+    identity.send(new GetCallerIdentityCommand({}), {
+      abortSignal: AbortSignal.timeout(5000),
+    }),
   );
-export const tables = {
-  config: process.env.CAPTIONDOOR_CONFIG_TABLE || "CaptionDoorConfig",
-  visits: process.env.CAPTIONDOOR_VISITS_TABLE || "CaptionDoorVisits",
-  runtime: process.env.CAPTIONDOOR_RUNTIME_TABLE || "CaptionDoorRuntime",
-};
-export const client = new DynamoDBClient({
-  region: process.env.AWS_REGION || "us-east-1",
-  ...(endpoint
-    ? {
-        endpoint,
-        credentials: {
-          accessKeyId: "captiondoorlocal",
-          secretAccessKey: "captiondoor-local",
-        },
-      }
-    : {}),
-});
+}
 export const db = DynamoDBDocumentClient.from(client, {
   marshallOptions: { removeUndefinedValues: true },
 });

@@ -54,56 +54,22 @@ export function HomeScreen() {
   }
   return (
     <Shell data={data} connection={connection}>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">A LITTLE PEACE OF MIND</p>
-          <h1>
-            Your door,
-            <br />
-            <em>in the loop.</em>
-          </h1>
-        </div>
+      <div className="page-heading compact home-heading">
+        <h1>At your door.</h1>
         <p className="heading-aside">
-          A clear view of what needs you.
-          <br />
-          You decide what happens next.
+          Read incoming speech. Handle it in person.
         </p>
       </div>
       <ErrorNotice message={actionError || error} />
       <div className="home-grid">
-        <section className="door-overview" aria-labelledby="door-name">
-          <div className="door-illustration" aria-hidden="true">
-            <div className="arch-outline" />
-            <DoorMark large />
-            <span className="door-step" />
-          </div>
-          <div>
-            <p className="eyebrow">YOUR SELECTED DOOR</p>
-            <h2 id="door-name">{door?.name || "Choose a door"}</h2>
-            <p>{data.household.name}</p>
-            <div className="readiness-line">
-              <span className="status-check" aria-hidden="true">
-                ✓
-              </span>
-              <span>
-                {data.mode.ring === "demo"
-                  ? "Local simulation ready"
-                  : "Integration configured separately"}
-              </span>
-            </div>
-          </div>
-          <Link href="/settings" className="text-link">
-            Check readiness <Arrow />
-          </Link>
-        </section>
         <section
           className={`current-card ${active.length ? "has-visit" : ""}`}
           aria-labelledby="current-title"
         >
           <div className="section-top">
-            <p className="eyebrow">AT YOUR DOOR</p>
-            <Pill tone={active.length ? "amber" : "green"}>
-              {active.length ? "Needs attention" : "All quiet"}
+            <p className="eyebrow">CURRENT VISIT</p>
+            <Pill tone={active.length ? "amber" : "neutral"}>
+              {active.length ? "Needs attention" : "No open visit"}
             </Pill>
           </div>
           {active.length ? (
@@ -122,8 +88,8 @@ export function HomeScreen() {
                 </h2>
                 <p>
                   {visit.status === "UNCLAIMED"
-                    ? "Take responsibility when you’re ready. Claiming a visit sends no reply."
-                    : "The visit stays open until a household member explicitly closes it."}
+                    ? "Claim this visit, then start incoming captions. Claiming sends no reply."
+                    : "Open incoming captions, then handle the visit in person."}
                 </p>
                 <div className="button-row">
                   {visit.status === "UNCLAIMED" ? (
@@ -151,14 +117,13 @@ export function HomeScreen() {
                 <i />
                 <i />
               </span>
-              <h2 id="current-title">
-                Nothing needs you
-                <br />
-                <em>right now.</em>
-              </h2>
+              <h2 id="current-title">No open visit.</h2>
               <p>
-                Doorbell alerts and visitor messages will appear here while
-                you’re connected.
+                {connection === "live"
+                  ? "A doorbell ring will appear here."
+                  : connection === "offline"
+                    ? "You’re offline. Live doorbell alerts are unavailable."
+                    : "Connecting for live doorbell alerts…"}
               </p>
               <Link className="text-link" href="/demo">
                 Try a local visit <Arrow />
@@ -166,11 +131,35 @@ export function HomeScreen() {
             </div>
           )}
         </section>
+        <section className="door-overview" aria-labelledby="door-name">
+          <div className="door-illustration" aria-hidden="true">
+            <div className="arch-outline" />
+            <DoorMark large />
+            <span className="door-step" />
+          </div>
+          <div>
+            <p className="eyebrow">YOUR SELECTED DOOR</p>
+            <h2 id="door-name">{door?.name || "Choose a door"}</h2>
+            <p>{data.household.name}</p>
+            <div className="readiness-line">
+              <span className="status-check" aria-hidden="true">
+                {data.mode.ring === "demo" ? "✓" : "○"}
+              </span>
+              <span>
+                {data.mode.ring === "demo"
+                  ? "Local simulation ready"
+                  : "Check Ring access in Settings"}
+              </span>
+            </div>
+          </div>
+          <Link href="/settings" className="text-link">
+            Check readiness <Arrow />
+          </Link>
+        </section>
       </div>
       <section className="recent-section" aria-labelledby="recent-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">THE SHORT HISTORY</p>
             <h2 id="recent-title">Recent visits</h2>
           </div>
           <span className="muted small">
@@ -209,18 +198,13 @@ export function HomeScreen() {
           </div>
         ) : (
           <Empty title="A fresh start.">
-            <p>
-              Your recent visits will live here, within your retention setting.
-            </p>
+            <p>Closed visits appear here within your retention setting.</p>
           </Empty>
         )}
       </section>
       <div className="privacy-note">
         <span aria-hidden="true">◇</span>
-        <p>
-          No continuous monitoring. No automatic replies. Every conversation
-          stays in your household.
-        </p>
+        <p>No continuous monitoring. No automatic replies.</p>
         <Link href="/settings">
           Your privacy choices <Arrow />
         </Link>

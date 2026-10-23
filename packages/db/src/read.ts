@@ -57,6 +57,7 @@ import {
   revokeSession,
   rateLimit,
   secret,
+  threadVisitAccessible,
 } from "./auth";
 import {
   ttl,
@@ -114,6 +115,12 @@ export async function bootstrap(actor: Actor): Promise<Bootstrap> {
       r.expiresAt > seconds() &&
       !r.deleted,
   );
+  const parentAccess = await Promise.all(
+    freshThreads.map((thread) =>
+      threadVisitAccessible(actor.householdId, thread),
+    ),
+  );
+  const visibleThreads = freshThreads.filter((_, index) => parentAccess[index]);
   const members = config
     .filter(
       (r) =>
@@ -136,7 +143,7 @@ export async function bootstrap(actor: Actor): Promise<Bootstrap> {
       ),
     ),
     threads: actor.grants.visitorText
-      ? freshThreads.map((r) => {
+      ? visibleThreads.map((r) => {
           const thread = clean<Thread>(r);
           const linked = visits.find((v) =>
             r.visitId
@@ -282,7 +289,12 @@ export async function guestView(
     threadPK(actor.householdId, actor.threadId),
     "STATE",
   );
-  if (!thread || thread.deleted || thread.expiresAt <= seconds())
+  if (
+    !thread ||
+    thread.deleted ||
+    thread.expiresAt <= seconds() ||
+    !(await threadVisitAccessible(actor.householdId, thread))
+  )
     throw new AppError("EXPIRED", 403, "This conversation has expired.");
   let sk: string | undefined;
   if (cursor) {

@@ -27,10 +27,10 @@ The local transport polls the due-work GSI, strongly rechecks and conditionally 
 
 1. A verified Ring button event or explicitly labeled local event atomically creates/returns the selected door's active visit and alert outbox job.
 2. A resident explicitly claims with the current version. One conditional transaction wins. Claiming never sends a reply.
-3. Captions, when available, are separate from visitor text and resident replies. Partial text can revise; a finalized caption is not verified truth.
-4. Each guest browser receives its own short-lived opaque thread. A resident explicitly associates it with the visit. Timing and the public QR code do not establish identity or presence.
-5. The handler edits a preset or writes a reply and explicitly selects **Send to visitor page**. Acknowledgement moves from ACCEPTED to visibly DISPLAYED to an explicit CONFIRMED action. Socket delivery alone does not imply either of the latter states.
-6. The resident closes with a recorded outcome. Timeout never proves that a person left. A closed session identifies an interaction, not a person.
+3. The handler explicitly starts available incoming captions after separate consent. Partial text can revise; a finalized caption is not verified truth. Local fixtures remain labeled Demo transcript.
+4. The resident handles the visit in person, then explicitly records a closure outcome. A timeout never proves departure. The app does not perform the in-person action or identify a person.
+
+Visitor text is an optional separate branch. Each guest browser receives its own short-lived opaque thread. The resident explicitly associates it; timing and a QR scan do not establish identity or presence. A handler may edit a preset and explicitly select **Send to visitor page**. ACCEPTED, DISPLAYED and deliberate CONFIRMED acknowledgement remain distinct; sockets do not imply that the visitor read it. This branch is not required for the primary caption journey.
 
 A pending handoff leaves responsibility with the existing handler until an authorized acceptance/takeover transaction fences old audio leases and stale replies. A lost socket stops capture but does not unclaim the visit. Text remains usable when media is absent, interrupted, expired or unsupported. A visitor without a phone can supply incoming speech captions if Ring audio is available, but cannot receive web replies; CaptionDoor never speaks through the Ring speaker.
 

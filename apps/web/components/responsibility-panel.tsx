@@ -24,7 +24,6 @@ export function ResponsibilityPanel({
         className="mobile-responsibility"
         aria-label="Current responsibility"
       >
-        <p className="eyebrow">WHO’S HANDLING THIS</p>
         {visit.status === "UNCLAIMED" ? (
           <>
             <p>
@@ -42,10 +41,10 @@ export function ResponsibilityPanel({
           <p role="status">
             <strong>
               {isHandler
-                ? "You’re responsible for this visit."
-                : `${visit.handlerName || "A household member"} is responsible for this visit.`}
+                ? "Handler: you."
+                : `Handler: ${visit.handlerName || "A household member"}.`}
             </strong>{" "}
-            Responsibility continues when a connection drops.
+            Responsibility continues offline.
           </p>
         )}
         {visit.pendingHandoff ? (
@@ -82,7 +81,10 @@ export function ResponsibilityPanel({
       {visit.status === "UNCLAIMED" ? (
         <>
           <h2>Take the lead.</h2>
-          <p>Claim responsibility before replying. This sends no message.</p>
+          <p>
+            Claim this visit, then choose when to start captions. Claiming sends
+            no reply.
+          </p>
           <button
             className="button primary full"
             disabled={!!busy}

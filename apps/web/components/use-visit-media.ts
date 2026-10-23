@@ -30,7 +30,8 @@ export function useVisitMedia({
   const [includeAudio, setIncludeAudio] = useState(false),
     [mediaNote, setMediaNote] = useState(""),
     [captureNote, setCaptureNote] = useState(""),
-    [mediaReady, setMediaReady] = useState(false);
+    [mediaReady, setMediaReady] = useState(false),
+    [hasRemoteAudio, setHasRemoteAudio] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null),
     remoteTrack = useRef<MediaStreamTrack | null>(null),
     mediaControl = useRef<{ close: () => Promise<void> } | null>(null),
@@ -56,6 +57,7 @@ export function useVisitMedia({
       captureSocket.current?.close();
       captureControl.current = null;
       remoteTrack.current = null;
+      setHasRemoteAudio(false);
       void mediaControl.current?.close().catch(() => {});
       mediaControl.current = null;
       setMediaReady(false);
@@ -143,6 +145,10 @@ export function useVisitMedia({
         },
         onRemoteAudio: (track) => {
           remoteTrack.current = track;
+          setHasRemoteAudio(track.readyState === "live");
+          track.addEventListener("ended", () => setHasRemoteAudio(false), {
+            once: true,
+          });
         },
       });
       mediaControl.current = control;
@@ -246,7 +252,10 @@ export function useVisitMedia({
     mediaControl.current = null;
     void perform({ type: "media", action: "stop" });
     setMediaReady(false);
-    setMediaNote("Media ended. Text remains available.");
+    setHasRemoteAudio(false);
+    setMediaNote(
+      "Media ended. Handle the visit in person or use optional visitor text.",
+    );
   }
   return {
     videoRef,
@@ -255,6 +264,7 @@ export function useVisitMedia({
     mediaNote,
     captureNote,
     mediaReady,
+    hasRemoteAudio,
     hasMedia: !!mediaControl.current,
     startMedia,
     startCapture,

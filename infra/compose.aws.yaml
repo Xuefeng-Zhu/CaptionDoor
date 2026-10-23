@@ -3,6 +3,10 @@
 name: captiondoor_host
 x-cloud-environment: &cloud-environment
   NODE_ENV: production
+  CAPTIONDOOR_DB_MODE: aws
+  CAPTIONDOOR_ENV: production
+  AWS_ACCOUNT_ID: ${AWS_ACCOUNT_ID:?Set approved account}
+  CAPTIONDOOR_AWS_TABLE_PREFIX: CaptionDoor
   AUTH_MODE: oidc
   RING_MODE: live
   TRANSCRIBE_MODE: aws

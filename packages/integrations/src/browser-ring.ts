@@ -71,9 +71,18 @@ export async function connectRingMedia(
   const abort = (): void =>
     terminate("ENDED", "Media stopped. Text remains available.");
 
+  const isSessionActive = (): boolean => {
+    if (closed) return false;
+    if (session && session.expiresAt <= Date.now()) {
+      terminate("ENDED", "Ring media session expired. Text remains available.");
+      return false;
+    }
+    return true;
+  };
+
   // Register handlers before creating an offer: early track events must not be lost.
   peer.ontrack = (event) => {
-    if (closed) {
+    if (!isSessionActive()) {
       event.track.stop();
       return;
     }
@@ -99,7 +108,7 @@ export async function connectRingMedia(
       terminate("INTERRUPTED", "Incoming media ended. Text remains available.");
   };
   peer.onconnectionstatechange = () => {
-    if (closed) return;
+    if (!isSessionActive()) return;
     if (peer.connectionState === "connected") {
       if (stream.getVideoTracks().length)
         options.onState(
@@ -138,10 +147,16 @@ export async function connectRingMedia(
     if (
       !session.mediaSessionId ||
       !/^v=0\r?\n/.test(session.answer) ||
+      !Number.isSafeInteger(session.expiresAt) ||
       session.expiresAt <= Date.now()
     )
       throw new Error("Media session response is invalid or expired.");
     await peer.setRemoteDescription({ type: "answer", sdp: session.answer });
+    // Cancellation and the provider lease may change while SDP is being applied.
+    if (closed || options.signal?.aborted)
+      throw new Error("Media connection cancelled.");
+    if (session.expiresAt <= Date.now())
+      throw new Error("Media session expired during connection.");
     const remaining = Math.min(
       60_000,
       Math.max(0, session.expiresAt - Date.now()),

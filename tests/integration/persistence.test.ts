@@ -687,6 +687,235 @@ describe("real DynamoDB Local authoritative persistence", () => {
       status: 401,
     });
   });
+  it("deletion requires explicit closure and preserves the active handler, capture and door pointer", async () => {
+    const f = await fixture();
+    const v = await capture(f);
+    const before = await getItem(tables.visits, visitPK(f.hid, v.id), "STATE");
+    await expect(
+      service.command(
+        f.a,
+        v.id,
+        { type: "delete", expectedVersion: v.version },
+        key(),
+      ),
+    ).rejects.toMatchObject({ code: "CLOSE_REQUIRED", status: 409 });
+    expect(await getItem(tables.visits, visitPK(f.hid, v.id), "STATE")).toEqual(
+      before,
+    );
+    expect(
+      (await getItem(tables.config, householdPK(f.hid), `DOOR#${f.deviceId}`))
+        ?.activeVisitId,
+    ).toBe(v.id);
+    expect(
+      await getItem(tables.runtime, visitPK(f.hid, v.id), "CAPTURE"),
+    ).toBeDefined();
+  });
+  it("queued visit deletion immediately rejects guest reads, replayed/new writes and acknowledgements before physical removal", async () => {
+    const f = await fixture();
+    const guest = await service.createGuest(f.publicDoorId);
+    const messageKey = key();
+    const input = {
+      category: "Other" as const,
+      text: "Private pending deletion",
+    };
+    await service.guestMessage(guest.actor, input, messageKey);
+    let v = await claimed(f);
+    v = (
+      await service.command(
+        f.a,
+        v.id,
+        {
+          type: "associate",
+          threadId: guest.thread.id,
+          expectedVersion: v.version,
+        },
+        key(),
+      )
+    ).visit;
+    await service.command(
+      f.a,
+      v.id,
+      {
+        type: "reply",
+        threadId: guest.thread.id,
+        text: "Private reply",
+        expectedVersion: v.version,
+      },
+      key(),
+    );
+    v = (await service.getVisit(f.a, v.id)).visit;
+    const reply = (await service.guestView(guest.actor)).messages.find(
+      (m) => m.direction === "resident",
+    )!;
+    v = (
+      await service.command(
+        f.a,
+        v.id,
+        { type: "close", outcome: "COMPLETED", expectedVersion: v.version },
+        key(),
+      )
+    ).visit;
+    expect((await service.guestView(guest.actor)).messages.length).toBe(2);
+    expect(
+      (await service.bootstrap(f.a)).threads.some(
+        (t) => t.id === guest.thread.id,
+      ),
+    ).toBe(true);
+    await service.command(
+      f.a,
+      v.id,
+      { type: "delete", expectedVersion: v.version },
+      key(),
+    );
+    // Worker deliberately not run: copies and guest session physically remain, while access must already end.
+    expect(
+      (
+        await queryPK(tables.visits, threadPK(f.hid, guest.thread.id), {
+          prefix: "MESSAGE#",
+        })
+      ).items,
+    ).toHaveLength(2);
+    expect(
+      await getItem(
+        tables.runtime,
+        `SESSION#${guest.actor.sessionId}`,
+        "SESSION",
+      ),
+    ).toBeDefined();
+    await expect(service.guestView(guest.actor)).rejects.toMatchObject({
+      status: 403,
+      code: "EXPIRED",
+    });
+    await expect(
+      service.guestMessage(guest.actor, input, messageKey),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service.guestMessage(
+        guest.actor,
+        { category: "Other", text: "New content" },
+        key(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service.delivery(guest.actor, reply.id, "DISPLAYED"),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(
+      (await service.bootstrap(f.a)).threads.some(
+        (t) => t.id === guest.thread.id,
+      ),
+    ).toBe(false);
+    await service.executeDeleteJob(
+      makeJob("DELETE_VISIT", f.hid, { visitId: v.id }),
+    );
+    expect(
+      (await queryPK(tables.visits, threadPK(f.hid, guest.thread.id))).items,
+    ).toHaveLength(0);
+    expect(
+      await getItem(
+        tables.runtime,
+        `SESSION#${guest.actor.sessionId}`,
+        "SESSION",
+      ),
+    ).toBeUndefined();
+  });
+  it("associated guest content expires with its parent before DynamoDB TTL removes either record", async () => {
+    const f = await fixture();
+    const guest = await service.createGuest(f.publicDoorId);
+    let v = await claimed(f);
+    v = (
+      await service.command(
+        f.a,
+        v.id,
+        {
+          type: "associate",
+          threadId: guest.thread.id,
+          expectedVersion: v.version,
+        },
+        key(),
+      )
+    ).visit;
+    const row = (await getItem(tables.visits, visitPK(f.hid, v.id), "STATE"))!;
+    await putItem(tables.visits, { ...row, expiresAt: sec() - 1 });
+    expect(
+      (await getItem(tables.visits, threadPK(f.hid, guest.thread.id), "STATE"))!
+        .expiresAt,
+    ).toBeGreaterThan(sec());
+    await expect(service.guestView(guest.actor)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(
+      (await service.bootstrap(f.a)).threads.some(
+        (t) => t.id === guest.thread.id,
+      ),
+    ).toBe(false);
+  });
+  it("guest message transaction cannot commit after associated-visit deletion wins the race", async () => {
+    const f = await fixture();
+    const guest = await service.createGuest(f.publicDoorId);
+    let v = await claimed(f);
+    v = (
+      await service.command(
+        f.a,
+        v.id,
+        {
+          type: "associate",
+          threadId: guest.thread.id,
+          expectedVersion: v.version,
+        },
+        key(),
+      )
+    ).visit;
+    v = (
+      await service.command(
+        f.a,
+        v.id,
+        { type: "close", outcome: "COMPLETED", expectedVersion: v.version },
+        key(),
+      )
+    ).visit;
+    const original = db.send.bind(db);
+    let injected = false;
+    const spy = vi.spyOn(db, "send").mockImplementation((async (
+      command: any,
+    ) => {
+      if (
+        !injected &&
+        command instanceof TransactWriteCommand &&
+        command.input.TransactItems?.some(
+          (item: any) =>
+            item.Update?.Key?.PK === threadPK(f.hid, guest.thread.id),
+        )
+      ) {
+        injected = true;
+        await service.command(
+          f.a,
+          v.id,
+          { type: "delete", expectedVersion: v.version },
+          key(),
+        );
+      }
+      return original(command);
+    }) as any);
+    try {
+      await expect(
+        service.guestMessage(
+          guest.actor,
+          { category: "Other", text: "Must not persist after deletion" },
+          key(),
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(injected).toBe(true);
+      expect(
+        (
+          await queryPK(tables.visits, threadPK(f.hid, guest.thread.id), {
+            prefix: "MESSAGE#",
+          })
+        ).items,
+      ).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it("sharing withdrawal removes saved conversation content from nonhandler reads", async () => {
     const f = await fixture();
     let v = await capture(f);

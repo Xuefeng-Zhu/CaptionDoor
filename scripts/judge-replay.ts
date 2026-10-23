@@ -24,19 +24,31 @@ export function assertReplayTarget(origin: string, nodeEnv?: string): string {
   }
   return url.origin;
 }
-export function assertReplayModes(web: unknown, worker: unknown): void {
+export function assertReplayWebModes(web: unknown): void {
   const a = web as Record<string, unknown> | null;
-  const b = worker as Record<string, unknown> | null;
   if (
     !a ||
     a.status !== "ok" ||
     a.database !== "DynamoDB" ||
+    a.databaseMode !== "local" ||
+    a.environment !== "local" ||
     a.authMode !== "demo" ||
     a.ringMode !== "demo" ||
-    a.transcribeMode !== "fixture" ||
+    a.transcribeMode !== "fixture"
+  )
+    throw new Error(
+      "Local test requires healthy local DynamoDB, demo authentication, LOCAL Ring simulation and FIXTURE transcription.",
+    );
+}
+export function assertReplayModes(web: unknown, worker: unknown): void {
+  assertReplayWebModes(web);
+  const b = worker as Record<string, unknown> | null;
+  if (
     !b ||
     b.status !== "ok" ||
     b.worker !== "single" ||
+    b.databaseMode !== "local" ||
+    b.environment !== "local" ||
     b.transport !== "local-due-poller" ||
     b.transcribe !== "fixture"
   ) {

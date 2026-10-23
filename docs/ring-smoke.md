@@ -1,8 +1,8 @@
 # Opt-in Ring smoke prerequisites and procedure
 
-Current execution results, provenance and intentionally paused service state are recorded in [test-results.md](test-results.md).
+Current execution results, provenance and intentionally paused service state are recorded in [test-results.md](test-results.md). After the Ring adapter fixes,64 unit tests, 41 real DynamoDB Local tests, 12 Chromium browser cases and production build/packaging checks passed; only CaptionDoor services ran and they were stopped normally with data retained. This local verification does not establish actual Ring access.
 
-**Provider smoke not executed.** The current Ring task authorizes read-only discovery. Creating credentials/OAuth grants, configuring ongoing credentials or transmitting bearer secrets still requires specific action-time approval; paid calls remain unauthorized. The Mac browser currently stops at Amazon Developer Registration, as recorded in [ring-access-checkpoint.md](ring-access-checkpoint.md). This checklist does not itself authorize a provider operation, legal acceptance, deployment, publication or submission.
+**Provider smoke not executed.** The user now reports seeing Generate Token and confirms the described short-lived Ring metadata/receive-only WHEP access plus the AWS identity-check step. No token has been generated or received by the agent. New OAuth/IAM grants, ongoing credential configuration, materially broader token scope or unknown portal terms remain outside that confirmation; the user approved a $10 total CaptionDoor transcription-verification budget, but provider execution remains gated on the outstanding access/identity/account/Region prerequisites. The initial test stays at or below 90 seconds, with no provider calls yet and $0.00 cumulative estimated charges. The current continuation additionally prepares local fixes and the opt-in harness; it does not expand external authorization. The user reports completing Amazon Developer registration, but the resumed toolset has no supported Mac browser-control tool, so the current Playground screen and token terms are unverified; see [ring-access-checkpoint.md](ring-access-checkpoint.md). Restore that read-only inspection before requesting action-time credential approval. This checklist does not itself authorize a provider operation, legal acceptance, deployment, publication or submission.
 
 CaptionDoor has no observed actual Ring API call, Playground session or device track. Its credential-free judge replay uses LOCAL fixtures and actual local application/database behavior. The [organizer's replay guidance](https://amazonappdev2026.devpost.com/forum_topics/45541-ring-playground-replay-mode-for-judging-ring-media-in-public-videos-and-simulated-alexa-wording) permits replay by default without requiring a judge to supply a Playground token; it does not turn synthetic responses into prior real validation.
 
@@ -34,7 +34,7 @@ curl --fail --max-time 8 http://127.0.0.1:3410/api/health
 curl --fail --max-time 8 http://127.0.0.1:3411/health
 ```
 
-There is currently no completed real-provider smoke transcript or automatic real-Ring smoke runner in this checkout. Do not invent a `smoke:ring` command or bypass authorization with direct database edits.
+There is no completed real-provider smoke transcript. A gated `corepack pnpm smoke:provider` harness is now prepared; its default is zero-network configuration preflight and it requires separate action-specific approval before `--run`. See [playground-audio-proof.md](playground-audio-proof.md) for exact stages, dedicated Local tables, temporary secret handling, audio availability, cost and cleanup limitations. Do not bypass authorization with direct database edits or a direct provider-test invocation.
 
 ## Validation order after separate authorization
 

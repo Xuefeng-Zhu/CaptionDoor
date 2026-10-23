@@ -17,6 +17,7 @@ import {
   credentialCipherFromEnv,
 } from "../../packages/integrations/src/crypto";
 
+const fixtureHardwareId = "21416940-c442-4c17-9584-72831fd504d0";
 const secret = "local-unit-signing-key-not-a-real-credential";
 const payload = {
   meta: {
@@ -208,6 +209,7 @@ describe("Ring media boundary", () => {
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = new RingClient({
+      hardwareId: fixtureHardwareId,
       mode: "playground",
       accessToken: "unit-token",
       fetch: transport,
@@ -219,23 +221,152 @@ describe("Ring media boundary", () => {
     expect(session.expiresAt - Date.now()).toBeGreaterThan(29_000);
     const [url, init] = transport.mock.calls[1];
     expect(url).toBe(location.replace("/session-unit", ""));
-    expect((init?.headers as Record<string, string>).Authorization).toBe(
+    expect(new Headers(init?.headers).get("Authorization")).toBe(
       "Bearer unit-token",
     );
     expect(init?.body).toBe(offer);
     await client.closeWhepSession(session);
     expect(transport.mock.calls[2][1]?.method).toBe("DELETE");
   });
-  it("reports encryption and missing credentials without fallback", async () => {
+  it("does not extend the provider lease by SDP response latency", async () => {
+    const requestedAt = 1_792_627_200_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(requestedAt);
+    try {
+      const response = new Response("v=0\r\ns=answer\r\n", {
+        status: 201,
+        headers: { Location: location },
+      });
+      vi.spyOn(response, "text").mockImplementation(async () => {
+        clock.mockReturnValue(requestedAt + 3_000);
+        return "v=0\r\ns=answer\r\n";
+      });
+      const transport = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json({
+            data: { attributes: { e2e_encryption: { enabled: false } } },
+          }),
+        )
+        .mockResolvedValueOnce(response);
+      const session = await new RingClient({
+        hardwareId: fixtureHardwareId,
+        mode: "playground",
+        accessToken: "unit-token",
+        fetch: transport,
+      }).createWhepSession("device-unit", offer);
+      expect(session.expiresAt).toBe(requestedAt + 30_000);
+      expect(session.expiresAt - Date.now()).toBe(27_000);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it.each(["malformed", "unreadable"])(
+    "cleans up a created session with an %s answer",
+    async (failure) => {
+      const response = new Response("not-an-sdp-answer", {
+        status: 201,
+        headers: { Location: location },
+      });
+      if (failure === "unreadable")
+        vi.spyOn(response, "text").mockRejectedValue(
+          new Error("private-provider-detail"),
+        );
+      const transport = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json({
+            data: { attributes: { e2e_encryption: { enabled: false } } },
+          }),
+        )
+        .mockResolvedValueOnce(response)
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      const client = new RingClient({
+        hardwareId: fixtureHardwareId,
+        mode: "playground",
+        accessToken: "unit-token",
+        fetch: transport,
+      });
+      await expect(
+        client.createWhepSession("device-unit", offer),
+      ).rejects.toMatchObject({
+        code: "RING_INVALID_RESPONSE",
+        message: "Ring returned an invalid media answer.",
+      });
+      expect(transport).toHaveBeenCalledTimes(3);
+      expect(transport.mock.calls[2][0]).toBe(location);
+      expect(transport.mock.calls[2][1]).toMatchObject({
+        method: "DELETE",
+        redirect: "error",
+      });
+      expect(
+        new Headers(transport.mock.calls[2][1]?.headers).get("Authorization"),
+      ).toBe("Bearer unit-token");
+    },
+  );
+  it("reports unconfirmed cleanup without leaking provider answer details", async () => {
     const transport = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
+      .mockResolvedValueOnce(
         Response.json({
-          data: { attributes: { e2e_encryption: { enabled: true } } },
+          data: { attributes: { e2e_encryption: { enabled: false } } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("private-provider-detail", {
+          status: 201,
+          headers: { Location: location },
+        }),
+      )
+      .mockRejectedValueOnce(new Error("private-network-detail"));
+    const client = new RingClient({
+      hardwareId: fixtureHardwareId,
+      mode: "playground",
+      accessToken: "unit-token",
+      fetch: transport,
+    });
+    await expect(
+      client.createWhepSession("device-unit", offer),
+    ).rejects.toMatchObject({
+      code: "RING_MEDIA_CLEANUP_UNCONFIRMED",
+      message:
+        "Ring returned an invalid media answer. Session cleanup could not be confirmed. Text remains available.",
+    });
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
+  it("never sends cleanup credentials to an untrusted returned Location", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { attributes: { e2e_encryption: { enabled: false } } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("not-an-answer", {
+          status: 201,
+          headers: { Location: "https://untrusted.example/session" },
         }),
       );
+    const client = new RingClient({
+      hardwareId: fixtureHardwareId,
+      mode: "playground",
+      accessToken: "unit-token",
+      fetch: transport,
+    });
+    await expect(
+      client.createWhepSession("device-unit", offer),
+    ).rejects.toMatchObject({ code: "RING_SESSION_URL_INVALID" });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+  it("reports encryption and missing credentials without fallback", async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        data: { attributes: { e2e_encryption: { enabled: true } } },
+      }),
+    );
     await expect(
       new RingClient({
+        hardwareId: fixtureHardwareId,
         mode: "playground",
         accessToken: "unit",
         fetch: transport,
@@ -243,10 +374,18 @@ describe("Ring media boundary", () => {
     ).rejects.toThrow("Encrypted");
     expect(transport).toHaveBeenCalledTimes(1);
     await expect(
-      new RingClient({ mode: "playground", fetch: transport }).listDevices(),
+      new RingClient({
+        hardwareId: fixtureHardwareId,
+        mode: "playground",
+        fetch: transport,
+      }).listDevices(),
     ).rejects.toThrow("credentials");
     await expect(
-      new RingClient({ mode: "demo", fetch: transport }).listDevices(),
+      new RingClient({
+        hardwareId: fixtureHardwareId,
+        mode: "demo",
+        fetch: transport,
+      }).listDevices(),
     ).rejects.toThrow("simulation");
   });
 });
@@ -276,6 +415,7 @@ describe("Ring OAuth boundaries", () => {
   it("keeps Playground tokens out of linking, refreshing and unlink calls", async () => {
     const transport = vi.fn<typeof fetch>();
     const client = new RingClient({
+      hardwareId: fixtureHardwareId,
       mode: "playground",
       accessToken: "unit-token",
       fetch: transport,
@@ -302,6 +442,7 @@ describe("Ring OAuth boundaries", () => {
       .mockResolvedValueOnce(Response.json({ status: "completed" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = new RingClient({
+      hardwareId: fixtureHardwareId,
       mode: "live",
       accessToken: "access-unit",
       clientId: "id-unit",
@@ -329,19 +470,67 @@ describe("Ring OAuth boundaries", () => {
     await client.unlink();
     expect(transport.mock.calls[2][1]?.method).toBe("DELETE");
   });
-  it("uses the official users resource id for account/webhook correlation", async () => {
+  it.each([
+    { access_token: "" },
+    { refresh_token: "" },
+    { access_token: "unsafe\r\nheader" },
+    { refresh_token: "unsafe\nheader" },
+    { expires_in: 0 },
+    { expires_in: 1.5 },
+    { expires_in: Number.MAX_SAFE_INTEGER },
+  ])("rejects unusable successful token responses: %j", async (override) => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        access_token: "access-unit",
+        refresh_token: "refresh-unit",
+        expires_in: 14400,
+        token_type: "Bearer",
+        ...override,
+      }),
+    );
+    const client = new RingClient({
+      hardwareId: fixtureHardwareId,
+      mode: "live",
+      clientId: "id-unit",
+      clientSecret: "secret-unit",
+      fetch: transport,
+    });
+    await expect(client.refresh("refresh-unit")).rejects.toMatchObject({
+      code: "RING_INVALID_RESPONSE",
+      message: "Ring returned an invalid token response.",
+    });
+  });
+  it.each([
+    "private-invalid-json",
+    '{"access_token":"access-unit","refresh_token":"refresh-unit","token_type":"Bearer","expires_in":1e309}',
+  ])("sanitizes invalid JSON and nonfinite token expiry", async (body) => {
     const transport = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
-        Response.json({
-          data: {
-            type: "users",
-            id: "ava1.ring.account.unit",
-            attributes: { first_name: "Unit" },
-          },
-        }),
-      );
+      .mockResolvedValue(new Response(body));
     const client = new RingClient({
+      hardwareId: fixtureHardwareId,
+      mode: "live",
+      clientId: "id-unit",
+      clientSecret: "secret-unit",
+      fetch: transport,
+    });
+    await expect(client.refresh("refresh-unit")).rejects.toMatchObject({
+      code: "RING_INVALID_RESPONSE",
+      message: "Ring returned an invalid token response.",
+    });
+  });
+  it("uses the official users resource id for account/webhook correlation", async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        data: {
+          type: "users",
+          id: "ava1.ring.account.unit",
+          attributes: { first_name: "Unit" },
+        },
+      }),
+    );
+    const client = new RingClient({
+      hardwareId: fixtureHardwareId,
       mode: "playground",
       accessToken: "unit-token",
       fetch: transport,
@@ -384,5 +573,82 @@ describe("Ring credential encryption", () => {
     expect(() => new CredentialCipher({ ...options, keyBase64: "" })).toThrow(
       "32-byte",
     );
+  });
+});
+
+describe("Ring required client headers", () => {
+  it.each([
+    undefined,
+    "",
+    "resident-id",
+    "00000000-0000-0000-0000-000000000000",
+    "21416940-c442-4c17-9584-72831fd504d0\r\nX-Test: injected",
+  ])("rejects invalid client UUID before transport (%s)", (hardwareId) => {
+    const transport = vi.fn<typeof fetch>();
+    expect(
+      () =>
+        new RingClient({
+          mode: "playground",
+          accessToken: "unit-token",
+          hardwareId: hardwareId as string,
+          fetch: transport,
+        }),
+    ).toThrow(
+      expect.objectContaining({ code: "RING_CLIENT_IDENTITY_REQUIRED" }),
+    );
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("sends stable app and client identity headers on every API and OAuth operation", async () => {
+    const location =
+      "https://api.amazonvision.com/v1/devices/device-unit/media/streaming/whep/sessions/header-test";
+    const transport = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input).includes("oauth.ring.com"))
+        return Response.json({
+          access_token: "access-unit",
+          refresh_token: "refresh-unit",
+          token_type: "Bearer",
+          expires_in: 14400,
+        });
+      if (String(input).includes("configurations"))
+        return Response.json({
+          data: { attributes: { e2e_encryption: { enabled: false } } },
+        });
+      if (init?.method === "POST")
+        return new Response("v=0\r\n", {
+          status: 201,
+          headers: { Location: location },
+        });
+      if (String(input).includes("/users/me"))
+        return Response.json({ data: { type: "users", id: "account-unit" } });
+      return Response.json({ data: [] });
+    });
+    const client = new RingClient({
+      mode: "live",
+      hardwareId: fixtureHardwareId,
+      accessToken: "access-unit",
+      clientId: "id-unit",
+      clientSecret: "secret-unit",
+      fetch: transport,
+    });
+    await client.exchangeAuthorizationCode("code-unit", "v".repeat(43));
+    await client.refresh("refresh-unit");
+    await client.getAccountId();
+    await client.listDevices();
+    await client.completeLink("a***");
+    await client.unlink();
+    const session = await client.createWhepSession(
+      "device-unit",
+      "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=recvonly\r\n",
+    );
+    await client.closeWhepSession(session);
+    expect(transport).toHaveBeenCalledTimes(9);
+    for (const [input, init] of transport.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("User-Agent")).toBe("CaptionDoor/0.1.0");
+      expect(headers.get("Hardware_Id")).toBe(fixtureHardwareId);
+      expect(headers.get("Authorization")).toBe(
+        String(input).includes("oauth.ring.com") ? null : "Bearer access-unit",
+      );
+    }
   });
 });

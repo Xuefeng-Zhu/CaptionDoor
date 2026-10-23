@@ -28,6 +28,7 @@ minimumReleaseAgeExclude:
   - '@aws-sdk/signature-v4-multi-region@3.996.49'
   - '@aws-sdk/token-providers@3.1155.0'
   - '@aws-sdk/types@3.975.0'
+  - '@aws-sdk/client-sts@3.1155.0'
 
 allowBuilds:
   esbuild: true

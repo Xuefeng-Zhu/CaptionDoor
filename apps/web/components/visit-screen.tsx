@@ -16,7 +16,7 @@ import { CaptionPanel } from "./caption-panel";
 import { ConversationPanel, SessionEvents } from "./conversation-panel";
 import { ResponsibilityPanel } from "./responsibility-panel";
 import { VisitActionPanels } from "./visit-action-panels";
-import { VisitMediaPanel } from "./visit-media-panel";
+import { IncomingCaptionControls, VisitMediaPanel } from "./visit-media-panel";
 import { useVisitMedia } from "./use-visit-media";
 export function VisitScreen({ id }: { id: string }) {
   const resident = useResident(),
@@ -162,9 +162,7 @@ export function VisitScreen({ id }: { id: string }) {
         body: { visitId: id, consent: true },
         csrf: data!.csrf,
       });
-      setNotice(
-        "Demo transcript started. These are synthetic fixture words, not captured visitor speech.",
-      );
+      setNotice("");
       await load();
     } catch (e) {
       setActionError(errorText(e));
@@ -271,19 +269,33 @@ export function VisitScreen({ id }: { id: string }) {
             hasCaptionAccess={view.access.captions}
             initialSize={data.settings.captionSize}
             allowFixture={
-              data.mode.transcribe === "fixture" && isHandler && !isClosed
+              data.mode.ring === "demo" &&
+              data.mode.transcribe === "fixture" &&
+              isHandler &&
+              !isClosed
             }
             busy={!!busy}
             demoCaptions={demoCaptions}
+            isHandler={isHandler}
+            controls={
+              <IncomingCaptionControls
+                data={data}
+                visit={visit}
+                access={view.access}
+                busy={!!busy}
+                media={media}
+              />
+            }
           />
-          <ConversationPanel
-            messages={messages}
-            hasVisitorTextAccess={view.access.visitorText}
-            associatedCount={associated.length}
-            nextCursor={view.nextCursor}
-            busy={!!busy}
-            loadEarlier={load}
-          />
+          {view.nextCursor ? (
+            <button
+              className="button secondary history-button"
+              disabled={!!busy}
+              onClick={() => void load(view.nextCursor)}
+            >
+              Load earlier visit history
+            </button>
+          ) : null}
           <VisitMediaPanel
             data={data}
             visit={visit}
@@ -306,6 +318,15 @@ export function VisitScreen({ id }: { id: string }) {
             )
           }
           onDeleted={() => router.push("/home")}
+          conversation={
+            <ConversationPanel
+              messages={messages}
+              hasVisitorTextAccess={view.access.visitorText}
+              associatedCount={associated.length}
+              busy={!!busy}
+              loadEarlier={load}
+            />
+          }
         />
       </div>
     </Shell>

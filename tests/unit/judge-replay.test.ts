@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   assertReplayTarget,
   assertReplayModes,
+  assertReplayWebModes,
   assertReplayIdle,
 } from "../../scripts/judge-replay";
 describe("judge replay cannot silently target a provider or production", () => {
@@ -36,6 +37,8 @@ describe("judge replay cannot silently target a provider or production", () => {
     const web = {
       status: "ok",
       database: "DynamoDB",
+      databaseMode: "local",
+      environment: "local",
       authMode: "demo",
       ringMode: "demo",
       transcribeMode: "fixture",
@@ -43,9 +46,13 @@ describe("judge replay cannot silently target a provider or production", () => {
     const worker = {
       status: "ok",
       worker: "single",
+      databaseMode: "local",
+      environment: "local",
       transport: "local-due-poller",
       transcribe: "fixture",
     };
+    // Recovery runs with the worker stopped, so the shared web-only guard must stand alone.
+    expect(() => assertReplayWebModes(web)).not.toThrow();
     expect(() => assertReplayModes(web, worker)).not.toThrow();
     for (const change of [
       { ringMode: "playground" },
@@ -53,8 +60,12 @@ describe("judge replay cannot silently target a provider or production", () => {
       { authMode: "oidc" },
       { transcribeMode: "aws" },
       { database: "memory" },
-    ])
+      { databaseMode: "aws" },
+      { environment: "remote-demo" },
+    ]) {
+      expect(() => assertReplayWebModes({ ...web, ...change })).toThrow();
       expect(() => assertReplayModes({ ...web, ...change }, worker)).toThrow();
+    }
     expect(() =>
       assertReplayModes(web, { ...worker, transport: "sqs" }),
     ).toThrow();

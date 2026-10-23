@@ -1,6 +1,8 @@
 name: captiondoor_local
 x-app-environment: &local-environment
   NODE_ENV: development
+  CAPTIONDOOR_DB_MODE: local
+  CAPTIONDOOR_ENV: local
   AUTH_MODE: demo
   RING_MODE: demo
   TRANSCRIBE_MODE: fixture
